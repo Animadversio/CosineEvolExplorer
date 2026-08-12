@@ -11,4 +11,5 @@ test("GitHub Pages bundle uses the repository base path and contains its data", 
   await access(new URL("data/index.json", output));
   await access(new URL("data/threads/Beto-02032022-005_thread000.json", output));
   await access(new URL("targets/1ddd98cf2aca9b9ed8beb632.webp", output));
+  await access(new URL("evolution/", output));
 });

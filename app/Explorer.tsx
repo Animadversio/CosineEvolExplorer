@@ -89,6 +89,30 @@ type PopulationData = {
   validation?: Record<string, number>;
 };
 
+type GenerationStimulusSample = {
+  role: "top" | "median" | "bottom";
+  roleRank: number;
+  scoreRank: number;
+  objectiveScore: number;
+  withinGenerationPercentile: number;
+  imageId: string;
+  asset: string;
+  assetBytes: number;
+  assetSha256: string;
+};
+
+type GenerationStimulusGallery = {
+  availability: "available" | "unavailable";
+  reason?: string;
+  selectionPolicy?: { topK: number; description: string };
+  generations?: {
+    generation: number;
+    block: number;
+    nImages: number;
+    samples: GenerationStimulusSample[];
+  }[];
+};
+
 type ThreadDetail = {
   schemaVersion: string;
   key: string;
@@ -136,6 +160,7 @@ type ThreadDetail = {
     q2StandardizedDeficit: number | null;
   };
   population: PopulationData;
+  generationStimuli?: GenerationStimulusGallery;
 };
 
 const ANIMALS = ["All", "Alfa", "Beto", "Caos", "Diablito"];
@@ -143,6 +168,7 @@ const BEST_CASE = "Beto-02032022-005#thread000";
 const GENERATION_COLORS = ["#440154", "#414487", "#2a788e", "#22a884", "#7ad151", "#fde725"];
 const PUBLIC_BASE = import.meta.env.BASE_URL === "/" ? "" : import.meta.env.BASE_URL.replace(/\/$/, "");
 type ActivityScale = "raw" | "reference_z" | "delta_g0";
+type StimulusChoice = "top" | "median" | "bottom";
 
 const ACTIVITY_SCALE_INFO = {
   raw: {
@@ -445,8 +471,27 @@ function TargetThumb({ src, name, large = false }: { src: string | null; name: s
 function ThreadView({ detail, selectedGeneration, setSelectedGeneration }: { detail: ThreadDetail; selectedGeneration: number; setSelectedGeneration: (value: number) => void }) {
   const { metadata: meta, status, population } = detail;
   const [activityScale, setActivityScale] = useState<ActivityScale>("reference_z");
+  const [stimulusChoice, setStimulusChoice] = useState<StimulusChoice>("top");
+  const [topRank, setTopRank] = useState(1);
   const trajectory = population.trajectory || [];
   const selected = trajectory[selectedGeneration] || null;
+  const stimulusGeneration = detail.generationStimuli?.generations?.find(
+    (row) => row.generation === selected?.generation,
+  );
+  const selectedStimulus = stimulusGeneration?.samples.find(
+    (row) => row.role === stimulusChoice && (row.role !== "top" || row.roleRank === topRank),
+  ) || null;
+  useEffect(() => {
+    const galleries = detail.generationStimuli?.generations;
+    if (!galleries?.length) return;
+    for (const index of [selectedGeneration - 1, selectedGeneration + 1]) {
+      const row = galleries[index];
+      const sample = row?.samples.find(
+        (item) => item.role === stimulusChoice && (item.role !== "top" || item.roleRank === topRank),
+      );
+      if (sample) new Image().src = publicUrl(sample.asset);
+    }
+  }, [detail.generationStimuli, selectedGeneration, stimulusChoice, topRank]);
   return (
     <>
       <div className="thread-heading">
@@ -460,6 +505,15 @@ function ThreadView({ detail, selectedGeneration, setSelectedGeneration }: { det
           <span className="method-badge">{status.selectedShape || "no fit"}</span>
         </div>
       </div>
+
+      {population.availability === "available" && selected && (
+        <div className="generation-control">
+          <button onClick={() => setSelectedGeneration(Math.max(0, selectedGeneration - 1))} disabled={selectedGeneration === 0} aria-label="Previous generation">←</button>
+          <div><span>Selected generation</span><strong>g{selected.generation}</strong><em>{selected.nImages} images · score {number(selected.scoreMean, 3)}</em></div>
+          <input aria-label="Selected generation" type="range" min={0} max={trajectory.length - 1} value={selectedGeneration} onChange={(event) => setSelectedGeneration(Number(event.target.value))} />
+          <button onClick={() => setSelectedGeneration(Math.min(trajectory.length - 1, selectedGeneration + 1))} disabled={selectedGeneration === trajectory.length - 1} aria-label="Next generation">→</button>
+        </div>
+      )}
 
       <div className="hero-grid">
         <section className="card target-card">
@@ -477,6 +531,16 @@ function ThreadView({ detail, selectedGeneration, setSelectedGeneration }: { det
           </dl>
         </section>
 
+        <GeneratedStimulusCard
+          gallery={detail.generationStimuli}
+          generation={stimulusGeneration}
+          sample={selectedStimulus}
+          choice={stimulusChoice}
+          topRank={topRank}
+          onChoice={setStimulusChoice}
+          onTopRank={setTopRank}
+        />
+
         <section className="card objective-card">
           <div className="card-title-row"><div><div className="panel-letter">A</div><div><h3>Optimized objective</h3><p>Exact per-image score, summarized by generation</p></div></div><StatusBadge success={status.trajectorySuccess} label={`composite q ${number(status.trajectoryQ, 3)}`} compact /></div>
           {population.availability === "available" ? (
@@ -486,15 +550,7 @@ function ThreadView({ detail, selectedGeneration, setSelectedGeneration }: { det
       </div>
 
       {population.availability === "available" && selected && (
-        <>
-          <div className="generation-control">
-            <button onClick={() => setSelectedGeneration(Math.max(0, selectedGeneration - 1))} disabled={selectedGeneration === 0} aria-label="Previous generation">←</button>
-            <div><span>Selected generation</span><strong>g{selected.generation}</strong><em>{selected.nImages} images · score {number(selected.scoreMean, 3)}</em></div>
-            <input aria-label="Selected generation" type="range" min={0} max={trajectory.length - 1} value={selectedGeneration} onChange={(event) => setSelectedGeneration(Number(event.target.value))} />
-            <button onClick={() => setSelectedGeneration(Math.min(trajectory.length - 1, selectedGeneration + 1))} disabled={selectedGeneration === trajectory.length - 1} aria-label="Next generation">→</button>
-          </div>
-          <ActivityScaleControl value={activityScale} onChange={setActivityScale} />
-        </>
+        <ActivityScaleControl value={activityScale} onChange={setActivityScale} />
       )}
 
       {population.availability === "available" ? (
@@ -532,6 +588,59 @@ function ThreadView({ detail, selectedGeneration, setSelectedGeneration }: { det
         {meta.comments && <details><summary>Operator notes from the experimental registry</summary><p>{meta.comments}</p></details>}
       </section>
     </>
+  );
+}
+
+function GeneratedStimulusCard({ gallery, generation, sample, choice, topRank, onChoice, onTopRank }: {
+  gallery?: GenerationStimulusGallery;
+  generation?: NonNullable<GenerationStimulusGallery["generations"]>[number];
+  sample: GenerationStimulusSample | null;
+  choice: StimulusChoice;
+  topRank: number;
+  onChoice: (choice: StimulusChoice) => void;
+  onTopRank: (rank: number) => void;
+}) {
+  const [failedAsset, setFailedAsset] = useState<string | null>(null);
+  const available = gallery?.availability === "available" && generation && sample;
+  const roleLabel = choice === "top" ? `Best ${topRank} of 3` : choice === "median" ? "Typical" : "Lowest";
+  return (
+    <section className="card stimulus-card">
+      <div className="card-label">Generated image {generation ? `· g${generation.generation}` : ""}</div>
+      {available && failedAsset !== sample.asset ? (
+        <img
+          key={sample.asset}
+          className="generated-image"
+          src={publicUrl(sample.asset)}
+          alt={`${roleLabel} generated stimulus from generation ${generation.generation}`}
+          loading="eager"
+          onError={() => setFailedAsset(sample.asset)}
+        />
+      ) : (
+        <div className="generated-placeholder"><span>{gallery?.availability === "unavailable" ? "∅" : "…"}</span></div>
+      )}
+      <div className="stimulus-choice" role="group" aria-label="Representative image selection">
+        {(["top", "median", "bottom"] as StimulusChoice[]).map((item) => (
+          <button key={item} className={choice === item ? "active" : ""} onClick={() => onChoice(item)} disabled={gallery?.availability !== "available"}>
+            {item === "top" ? "Best" : item === "median" ? "Typical" : "Lowest"}
+          </button>
+        ))}
+      </div>
+      {choice === "top" && (
+        <div className="top-rank-control" aria-label="Choose one of the top three images">
+          <span>Top image</span>
+          {[1, 2, 3].map((rank) => <button key={rank} className={rank === topRank ? "active" : ""} onClick={() => onTopRank(rank)}>{rank}</button>)}
+        </div>
+      )}
+      {available ? (
+        <div className="stimulus-caption">
+          <div><strong>{roleLabel}</strong><span>rank {sample.scoreRank} of {generation.nImages}</span></div>
+          <div><span>Exact score</span><strong>{number(sample.objectiveScore, 3)}</strong></div>
+          <div><span>Within generation</span><strong>{number(sample.withinGenerationPercentile, 0)}th percentile</strong></div>
+        </div>
+      ) : (
+        <p className="stimulus-unavailable">{gallery?.reason || "Representative generated images have not been attached to this data bundle."}</p>
+      )}
+    </section>
   );
 }
 
