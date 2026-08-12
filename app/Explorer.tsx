@@ -64,12 +64,17 @@ type PopulationData = {
   geometryFrame?: string;
   geometryExact?: boolean;
   units?: { index: number; channel: number; unitSlot: number; label: string }[];
-  targetFrame?: number[];
-  targetRawHz?: number[];
-  meanFrame?: number[][];
+  targetFrame?: (number | null)[];
+  targetRawHz?: (number | null)[];
+  referenceMeanRawHz?: (number | null)[];
+  referenceStdRawHz?: (number | null)[];
+  targetReferenceZ?: (number | null)[];
+  meanFrame?: (number | null)[][];
   semFrame?: (number | null)[][];
-  meanRawHz?: number[][];
+  meanRawHz?: (number | null)[][];
   semRawHz?: (number | null)[][];
+  meanReferenceZ?: (number | null)[][];
+  semReferenceZ?: (number | null)[][];
   trajectory?: TrajectoryPoint[];
   scoreScaleEarlyImageSd?: number | null;
   objectiveIdealCeiling?: number | null;
@@ -136,6 +141,39 @@ type ThreadDetail = {
 const ANIMALS = ["All", "Alfa", "Beto", "Caos", "Diablito"];
 const BEST_CASE = "Beto-02032022-005#thread000";
 const GENERATION_COLORS = ["#440154", "#414487", "#2a788e", "#22a884", "#7ad151", "#fde725"];
+type ActivityScale = "raw" | "reference_z" | "delta_g0";
+
+const ACTIVITY_SCALE_INFO = {
+  raw: {
+    button: "Raw Hz",
+    title: "Raw baseline-adjusted Hz",
+    formula: "r(g, unit)",
+    description: "Literal evoked response after the validated baseline convention; preserves firing-rate magnitude.",
+    yLabel: "baseline-adjusted response (Hz)",
+  },
+  reference_z: {
+    button: "Selectivity z",
+    title: "Selectivity/reference-image z-score",
+    formula: "(r − μref) / σref",
+    description: "Each unit is centered and scaled by its responses across the reference images in the selectivity experiment.",
+    yLabel: "response relative to reference images (z)",
+  },
+  delta_g0: {
+    button: "Change from g0",
+    title: "Change from generation 0",
+    formula: "(r(g) − r(g0)) / σref",
+    description: "Shows the acquired activity change in reference-image SD units; generation 0 is exactly zero.",
+    yLabel: "change from g0 (reference-image SD)",
+  },
+} as const;
+
+type ActivityView = {
+  target: (number | null)[];
+  means: (number | null)[][];
+  sems: (number | null)[][];
+  targetLabel: string;
+  generationLabel: string;
+};
 
 function finite(value: number | null | undefined): value is number {
   return value != null && Number.isFinite(value);
@@ -159,6 +197,42 @@ function generationColor(index: number, total: number) {
   if (total <= 1) return GENERATION_COLORS[3];
   const scaled = (index / (total - 1)) * (GENERATION_COLORS.length - 1);
   return GENERATION_COLORS[Math.min(GENERATION_COLORS.length - 1, Math.round(scaled))];
+}
+
+function subtractVectors(values: (number | null)[], baseline: (number | null)[]) {
+  return values.map((value, index) => finite(value) && finite(baseline[index]) ? value - baseline[index]! : null);
+}
+
+function activityView(population: PopulationData, scale: ActivityScale): ActivityView {
+  if (scale === "raw") {
+    return {
+      target: population.targetRawHz || [],
+      means: population.meanRawHz || [],
+      sems: population.semRawHz || [],
+      targetLabel: "fixed online target",
+      generationLabel: "selected generation mean",
+    };
+  }
+  const target = population.targetReferenceZ || [];
+  const means = population.meanReferenceZ || [];
+  const sems = population.semReferenceZ || [];
+  if (scale === "reference_z") {
+    return { target, means, sems, targetLabel: "fixed online target", generationLabel: "selected generation mean" };
+  }
+  const baseline = means[0] || [];
+  const deltaSem = sems.map((row, generationIndex) => row.map((value, unitIndex) => {
+    if (!finite(value) || !finite(baseline[unitIndex])) return null;
+    if (generationIndex === 0) return 0;
+    const baselineSem = sems[0]?.[unitIndex];
+    return finite(baselineSem) ? Math.hypot(value, baselineSem) : value;
+  }));
+  return {
+    target: subtractVectors(target, baseline),
+    means: means.map((row) => subtractVectors(row, baseline)),
+    sems: deltaSem,
+    targetLabel: "target change from g0",
+    generationLabel: "selected change from g0",
+  };
 }
 
 export default function Explorer() {
@@ -365,6 +439,7 @@ function TargetThumb({ src, name, large = false }: { src: string | null; name: s
 
 function ThreadView({ detail, selectedGeneration, setSelectedGeneration }: { detail: ThreadDetail; selectedGeneration: number; setSelectedGeneration: (value: number) => void }) {
   const { metadata: meta, status, population } = detail;
+  const [activityScale, setActivityScale] = useState<ActivityScale>("reference_z");
   const trajectory = population.trajectory || [];
   const selected = trajectory[selectedGeneration] || null;
   return (
@@ -406,34 +481,35 @@ function ThreadView({ detail, selectedGeneration, setSelectedGeneration }: { det
       </div>
 
       {population.availability === "available" && selected && (
-        <div className="generation-control">
-          <button onClick={() => setSelectedGeneration(Math.max(0, selectedGeneration - 1))} disabled={selectedGeneration === 0} aria-label="Previous generation">←</button>
-          <div><span>Selected generation</span><strong>g{selected.generation}</strong><em>{selected.nImages} images · score {number(selected.scoreMean, 3)}</em></div>
-          <input aria-label="Selected generation" type="range" min={0} max={trajectory.length - 1} value={selectedGeneration} onChange={(event) => setSelectedGeneration(Number(event.target.value))} />
-          <button onClick={() => setSelectedGeneration(Math.min(trajectory.length - 1, selectedGeneration + 1))} disabled={selectedGeneration === trajectory.length - 1} aria-label="Next generation">→</button>
-        </div>
+        <>
+          <div className="generation-control">
+            <button onClick={() => setSelectedGeneration(Math.max(0, selectedGeneration - 1))} disabled={selectedGeneration === 0} aria-label="Previous generation">←</button>
+            <div><span>Selected generation</span><strong>g{selected.generation}</strong><em>{selected.nImages} images · score {number(selected.scoreMean, 3)}</em></div>
+            <input aria-label="Selected generation" type="range" min={0} max={trajectory.length - 1} value={selectedGeneration} onChange={(event) => setSelectedGeneration(Number(event.target.value))} />
+            <button onClick={() => setSelectedGeneration(Math.min(trajectory.length - 1, selectedGeneration + 1))} disabled={selectedGeneration === trajectory.length - 1} aria-label="Next generation">→</button>
+          </div>
+          <ActivityScaleControl value={activityScale} onChange={setActivityScale} />
+        </>
       )}
 
       {population.availability === "available" ? (
         <>
-          <div className="two-column-grid">
-            <section className="card heatmap-card">
-              <PanelTitle letter="B" title="Population activity" subtitle={`Fixed target and generation means · ${population.geometryFrame}`} />
-              <PopulationHeatmap population={population} selected={selectedGeneration} onSelect={setSelectedGeneration} />
-            </section>
+          <section className="card profile-card">
+            <PanelTitle letter="E" title={`Activity profile at g${selected?.generation ?? 0}`} subtitle={`Generation mean compared with target · ${ACTIVITY_SCALE_INFO[activityScale].title}`} />
+            <ProfileChart population={population} scale={activityScale} selected={selectedGeneration} />
+          </section>
+          <section className="card heatmap-card">
+            <PanelTitle letter="B" title="Population activity" subtitle={`Fixed target and generation means · ${ACTIVITY_SCALE_INFO[activityScale].title}`} />
+            <PopulationHeatmap population={population} scale={activityScale} selected={selectedGeneration} onSelect={setSelectedGeneration} />
+          </section>
+          <div className="two-column-grid lower-grid">
             <section className="card geometry-card">
               <PanelTitle letter="C" title="Distance to target" subtitle="Pattern alignment, gain, and residual error" />
               <GeometryTraces trajectory={trajectory} selected={selectedGeneration} onSelect={setSelectedGeneration} />
             </section>
-          </div>
-          <div className="two-column-grid lower-grid">
             <section className="card path-card">
               <PanelTitle letter="D" title="Population-vector path" subtitle="Target projection × dominant residual axis" />
               <VectorPath trajectory={trajectory} selected={selectedGeneration} onSelect={setSelectedGeneration} />
-            </section>
-            <section className="card profile-card">
-              <PanelTitle letter="E" title={`Activity profile at g${selected?.generation ?? 0}`} subtitle="Generation mean compared with the fixed online target" />
-              <ProfileChart population={population} selected={selectedGeneration} />
             </section>
           </div>
         </>
@@ -468,6 +544,21 @@ function PanelTitle({ letter, title, subtitle }: { letter: string; title: string
 
 function Unavailable({ reason }: { reason?: string | null }) {
   return <div className="unavailable"><span>∅</span><div><strong>No validated data for this panel</strong><p>{reason || "This run was not eligible for the current scientific cache."}</p></div></div>;
+}
+
+function ActivityScaleControl({ value, onChange }: { value: ActivityScale; onChange: (value: ActivityScale) => void }) {
+  const info = ACTIVITY_SCALE_INFO[value];
+  return (
+    <section className="activity-scale-control" aria-label="Population activity normalization">
+      <div className="activity-scale-heading"><span>Activity scale</span><strong>{info.title}</strong></div>
+      <div className="activity-scale-buttons" role="group" aria-label="Choose activity scale">
+        {(Object.keys(ACTIVITY_SCALE_INFO) as ActivityScale[]).map((scale) => (
+          <button key={scale} className={value === scale ? "active" : ""} aria-pressed={value === scale} onClick={() => onChange(scale)}>{ACTIVITY_SCALE_INFO[scale].button}</button>
+        ))}
+      </div>
+      <div className="activity-scale-explanation"><code>{info.formula}</code><span>{info.description}</span></div>
+    </section>
+  );
 }
 
 function ObjectiveChart({ population, selected, onSelect }: { population: PopulationData; selected: number; onSelect: (value: number) => void }) {
@@ -516,10 +607,12 @@ function ObjectiveChart({ population, selected, onSelect }: { population: Popula
   );
 }
 
-function PopulationHeatmap({ population, selected, onSelect }: { population: PopulationData; selected: number; onSelect: (value: number) => void }) {
+function PopulationHeatmap({ population, scale, selected, onSelect }: { population: PopulationData; scale: ActivityScale; selected: number; onSelect: (value: number) => void }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [hover, setHover] = useState<{ row: number; col: number } | null>(null);
-  const matrix = useMemo(() => [population.targetFrame || [], ...(population.meanFrame || [])], [population]);
+  const view = useMemo(() => activityView(population, scale), [population, scale]);
+  const matrix = useMemo(() => [view.target, ...view.means], [view]);
+  const scaleInfo = ACTIVITY_SCALE_INFO[scale];
   const finiteValues = matrix.flat().filter(finite).map(Math.abs).sort((a, b) => a - b);
   const limit = finiteValues[Math.floor(finiteValues.length * 0.98)] || 1;
   const rows = population.units?.length || 0, cols = matrix.length;
@@ -536,13 +629,17 @@ function PopulationHeatmap({ population, selected, onSelect }: { population: Pop
     context.scale(ratio, ratio);
     const cellWidth = rect.width / cols, cellHeight = height / rows;
     matrix.forEach((column, col) => column.forEach((value, row) => {
-      const normalized = Math.max(-1, Math.min(1, (value || 0) / limit));
+      if (!finite(value)) {
+        context.fillStyle = "#273138";
+        context.fillRect(col * cellWidth, row * cellHeight, Math.ceil(cellWidth) + 0.5, Math.ceil(cellHeight) + 0.5);
+        return;
+      }
+      const normalized = Math.max(-1, Math.min(1, value / limit));
       if (normalized >= 0) {
-        const fade = Math.round(246 - normalized * 168);
-        context.fillStyle = `rgb(${fade},${Math.round(fade + normalized * 8)},${Math.round(246 - normalized * 28)})`;
+        context.fillStyle = `rgb(${Math.round(246 - normalized * 34)},${Math.round(246 - normalized * 167)},${Math.round(246 - normalized * 142)})`;
       } else {
         const strength = -normalized;
-        context.fillStyle = `rgb(${Math.round(246 - strength * 34)},${Math.round(246 - strength * 118)},${Math.round(246 - strength * 142)})`;
+        context.fillStyle = `rgb(${Math.round(246 - strength * 168)},${Math.round(246 - strength * 141)},${Math.round(246 - strength * 28)})`;
       }
       context.fillRect(col * cellWidth, row * cellHeight, Math.ceil(cellWidth) + 0.5, Math.ceil(cellHeight) + 0.5);
     }));
@@ -562,9 +659,9 @@ function PopulationHeatmap({ population, selected, onSelect }: { population: Pop
   const hoverUnit = hover ? population.units?.[hover.row] : null;
   return (
     <div className="heatmap-wrap">
-      <div className="heatmap-labels"><span>fixed target</span><span>generation means →</span></div>
-      <canvas ref={canvasRef} style={{ height }} onMouseMove={(event) => setHover(locate(event.clientX, event.clientY))} onMouseLeave={() => setHover(null)} onClick={(event) => { const point = locate(event.clientX, event.clientY); if (point.col > 0) onSelect(point.col - 1); }} aria-label={`Population activity heatmap with ${rows} units and ${cols - 1} generations`} role="img" />
-      <div className="heatmap-footer"><div className="color-key"><span>−{number(limit, 1)}</span><i /><span>0</span><b /><span>+{number(limit, 1)}</span></div><div className="heatmap-readout">{hover && hoverUnit ? `${hoverUnit.label} · ${hover.col === 0 ? "target" : `g${hover.col - 1}`} · ${number(hoverValue, 3)}` : `${population.geometryFrame} · hover to inspect`}</div></div>
+      <div className="heatmap-labels"><span>{scale === "delta_g0" ? "target − g0" : "fixed target"}</span><span>{scale === "delta_g0" ? "generation change from g0 →" : "generation means →"}</span></div>
+      <canvas ref={canvasRef} style={{ height }} onMouseMove={(event) => setHover(locate(event.clientX, event.clientY))} onMouseLeave={() => setHover(null)} onClick={(event) => { const point = locate(event.clientX, event.clientY); if (point.col > 0) onSelect(point.col - 1); }} aria-label={`${scaleInfo.title} population heatmap with ${rows} units and ${cols - 1} generations`} role="img" />
+      <div className="heatmap-footer"><div className="color-key"><span>−{number(limit, 1)}</span><i /><span>0</span><b /><span>+{number(limit, 1)}</span><em title="Reference SD unavailable">n/a</em></div><div className="heatmap-readout">{hover && hoverUnit ? `${hoverUnit.label} · ${hover.col === 0 ? "target" : `g${hover.col - 1}`} · ${number(hoverValue, 3)}` : `${scaleInfo.yLabel} · symmetric 98% color range`}</div></div>
     </div>
   );
 }
@@ -602,12 +699,33 @@ function VectorPath({ trajectory, selected, onSelect }: { trajectory: Trajectory
   return <div className="path-wrap"><svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Population vector path toward target"><line x1={x(1)} x2={x(1)} y1={top} y2={height - bottom} className="target-line" /><line x1={left} x2={width - right} y1={y(0)} y2={y(0)} className="target-line" /><path d={path} className="path-line" />{trajectory.map((row, index) => finite(row.projectionRatio) && finite(row.residualPc1) && <circle key={index} cx={x(row.projectionRatio)} cy={y(row.residualPc1)} r={index === selected ? 7 : 4} fill={generationColor(index, trajectory.length)} className={index === selected ? "path-point selected" : "path-point"} onClick={() => onSelect(index)}><title>{`g${row.generation}: projection ${number(row.projectionRatio)}, residual ${number(row.residualPc1)}`}</title></circle>)}<text x={x(1)} y={y(0) + 5} textAnchor="middle" className="target-star">★</text><text x={(left + width - right) / 2} y={height - 10} textAnchor="middle" className="axis-title">target projection ratio → 1</text><text transform={`translate(16 ${(top + height - bottom) / 2}) rotate(-90)`} textAnchor="middle" className="axis-title">residual principal coordinate</text></svg><div className="path-caption"><span><i className="generation-gradient" /> early → late generation</span><span>★ fixed target at (1, 0)</span></div></div>;
 }
 
-function ProfileChart({ population, selected }: { population: PopulationData; selected: number }) {
-  const target = population.targetRawHz || [], generation = population.meanRawHz?.[selected] || [], units = population.units || [];
+function ProfileChart({ population, scale, selected }: { population: PopulationData; scale: ActivityScale; selected: number }) {
+  const view = activityView(population, scale);
+  const target = view.target, generation = view.means[selected] || [], sem = view.sems[selected] || [], units = population.units || [];
+  const scaleInfo = ACTIVITY_SCALE_INFO[scale];
+  const generationNumber = population.trajectory?.[selected]?.generation ?? selected;
   const width = 660, height = 350, left = 52, right = 16, top = 20, bottom = 58;
-  const valid = [...target, ...generation].filter(finite); let min = Math.min(...valid, 0), max = Math.max(...valid, 1); const pad = Math.max((max - min) * .1, 1); min -= pad; max += pad;
+  const valid = [...target, ...generation, ...generation.map((value, index) => finite(value) && finite(sem[index]) ? value + sem[index]! : null), ...generation.map((value, index) => finite(value) && finite(sem[index]) ? value - sem[index]! : null)].filter(finite);
+  let min = Math.min(...valid, 0), max = Math.max(...valid, scale === "raw" ? 1 : .1);
+  const pad = Math.max((max - min) * .1, scale === "raw" ? 1 : .1); min -= pad; max += pad;
   const x = (index: number) => left + index / Math.max(1, units.length - 1) * (width - left - right);
   const y = (value: number) => top + (max - value) / (max - min) * (height - top - bottom);
-  const path = (series: number[]) => series.map((value, index) => `${index ? "L" : "M"}${x(index)},${y(value)}`).join(" ");
-  return <div className="profile-wrap"><svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Channel-by-channel population profile"><line x1={left} x2={width - right} y1={y(0)} y2={y(0)} className="target-line" /><path d={path(target)} className="profile-target" /><path d={path(generation)} className="profile-generation" />{generation.map((value, index) => <circle key={index} cx={x(index)} cy={y(value)} r="2.5" className="profile-point"><title>{`${units[index]?.label}: generation ${number(value)} Hz, target ${number(target[index])} Hz`}</title></circle>)}{units.filter((_, index) => index % Math.max(1, Math.ceil(units.length / 9)) === 0).map((unit) => <text key={unit.index} x={x(unit.index)} y={height - bottom + 22} transform={`rotate(45 ${x(unit.index)} ${height - bottom + 22})`} className="axis-label">{unit.label}</text>)}<text transform={`translate(15 ${(top + height - bottom) / 2}) rotate(-90)`} textAnchor="middle" className="axis-title">baseline-adjusted response (Hz)</text></svg><div className="chart-legend"><span><i className="line black" />fixed online target</span><span><i className="line teal" />selected generation mean</span></div></div>;
+  const path = (series: (number | null)[]) => {
+    let drawing = false;
+    return series.map((value, index) => {
+      if (!finite(value)) { drawing = false; return ""; }
+      const command = drawing ? "L" : "M"; drawing = true;
+      return `${command}${x(index)},${y(value)}`;
+    }).join(" ");
+  };
+  const yTicks = Array.from({ length: 5 }, (_, index) => min + (index / 4) * (max - min));
+  const xStep = Math.max(1, Math.ceil(units.length / 9));
+  return <div className="profile-wrap"><svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`Channel-by-channel population profile in ${scaleInfo.title}`}>
+    {yTicks.map((tick) => <g key={tick}><line x1={left} x2={width - right} y1={y(tick)} y2={y(tick)} className="gridline" /><text x={left - 8} y={y(tick) + 4} textAnchor="end" className="axis-label">{number(tick, 1)}</text></g>)}
+    <line x1={left} x2={width - right} y1={y(0)} y2={y(0)} className="target-line" />
+    <path d={path(target)} className="profile-target" /><path d={path(generation)} className="profile-generation" />
+    {generation.map((value, index) => finite(value) && <g key={index}>{finite(sem[index]) && <><line x1={x(index)} x2={x(index)} y1={y(value - sem[index]!)} y2={y(value + sem[index]!)} className="profile-errorbar" /><line x1={x(index) - 2.5} x2={x(index) + 2.5} y1={y(value - sem[index]!)} y2={y(value - sem[index]!)} className="profile-errorbar" /><line x1={x(index) - 2.5} x2={x(index) + 2.5} y1={y(value + sem[index]!)} y2={y(value + sem[index]!)} className="profile-errorbar" /></>}<circle cx={x(index)} cy={y(value)} r="2.5" className="profile-point"><title>{`${units[index]?.label}: g${generationNumber} ${number(value)}, target ${number(target[index])}, SEM ${number(sem[index])}`}</title></circle></g>)}
+    {units.map((unit, index) => ({ unit, index })).filter(({ index }) => index % xStep === 0).map(({ unit, index }) => <text key={unit.index} x={x(index)} y={height - bottom + 22} transform={`rotate(45 ${x(index)} ${height - bottom + 22})`} className="axis-label">{unit.label}</text>)}
+    <text transform={`translate(15 ${(top + height - bottom) / 2}) rotate(-90)`} textAnchor="middle" className="axis-title">{scaleInfo.yLabel}</text>
+  </svg><div className="chart-legend"><span><i className="line black" />{view.targetLabel}</span><span><i className="line teal" />{view.generationLabel} ± SEM</span></div></div>;
 }
