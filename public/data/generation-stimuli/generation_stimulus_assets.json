@@ -1,0 +1,17 @@
+{
+  "schema_version": "generation-stimulus-webp-v1",
+  "created_at": "2026-08-12T21:17:48+00:00",
+  "selection_sha256": "28621b4f1d4f8707c1f7c6dec8775e634db8995bd68b85bf5a33a9f486269b54",
+  "size_px": 256,
+  "webp_quality": 75,
+  "webp_method": 6,
+  "workers": 16,
+  "pilot_generations": null,
+  "selected_rows": 43790,
+  "unique_assets": 43770,
+  "asset_total_bytes": 747552092,
+  "asset_mean_bytes": 17079.097372629654,
+  "asset_p95_bytes": 23312.0,
+  "elapsed_seconds": 195.4082638269756,
+  "asset_manifest_sha256": "bf84d962101bae93f0b4dfe474a6adc6d3da9905415bf93664a6d186233d4ae5"
+}

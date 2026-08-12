@@ -1,0 +1,17 @@
+{
+  "schema_version": "generation-stimulus-validation-v1",
+  "created_at": "2026-08-12T21:18:50+00:00",
+  "selection_sha256": "28621b4f1d4f8707c1f7c6dec8775e634db8995bd68b85bf5a33a9f486269b54",
+  "asset_manifest_sha256": "bf84d962101bae93f0b4dfe474a6adc6d3da9905415bf93664a6d186233d4ae5",
+  "selection_rows": 43790,
+  "selection_generations": 8758,
+  "selection_threads": 272,
+  "unique_assets": 43770,
+  "observed_files": 43770,
+  "asset_total_bytes": 747552092,
+  "all_hashes_match": true,
+  "all_dimensions_256x256": true,
+  "all_decode_as_webp": true,
+  "elapsed_seconds": 11.584627527976409,
+  "workers": 16
+}

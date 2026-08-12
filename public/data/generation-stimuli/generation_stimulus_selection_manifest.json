@@ -1,0 +1,17 @@
+{
+  "schema_version": "generation-stimulus-selection-v1",
+  "created_at": "2026-08-12T20:51:03+00:00",
+  "top_k": 3,
+  "roles": [
+    "top",
+    "median",
+    "bottom"
+  ],
+  "threads": 272,
+  "generations": 8758,
+  "selection_rows": 43790,
+  "unique_assets": 43770,
+  "catalog_path": "presentations.parquet",
+  "catalog_sha256": "1b0a58fc0d2551dee1b6de3aedd683ad5b5809a923044f6f36ecf806ae202925",
+  "selection_sha256": "28621b4f1d4f8707c1f7c6dec8775e634db8995bd68b85bf5a33a9f486269b54"
+}
