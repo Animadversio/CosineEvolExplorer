@@ -516,30 +516,32 @@ function ThreadView({ detail, selectedGeneration, setSelectedGeneration }: { det
       )}
 
       <div className="hero-grid">
-        <section className="card target-card">
-          <div className="card-label">Fixed target image</div>
-          <TargetThumb src={meta.targetAsset} name={meta.targetName} large />
-          <div className="target-name"><strong>{meta.targetName}</strong><span>{meta.targetAsset ? "Exact archived stimulus" : meta.targetAssetStatus}</span></div>
-          <dl className="meta-list">
-            <MetaRow label="Objective" value={meta.objective} />
-            <MetaRow label="Area" value={meta.area} />
-            <MetaRow label="Generator" value={meta.generator} />
-            <MetaRow label="Baseline" value={humanBaseline(meta.baselineMode)} />
-            <MetaRow label="Evoked window" value={`${meta.responseWindowSeconds[0] * 1000}–${meta.responseWindowSeconds[1] * 1000} ms`} />
-            <MetaRow label="Image aperture" value={finite(meta.imageSizeDegrees) ? `${meta.imageSizeDegrees}°` : "—"} />
-            <MetaRow label="Reference session" value={meta.targetSourceSession || "not image-resolved"} />
-          </dl>
-        </section>
+        <div className="stimulus-pair">
+          <section className="card target-card">
+            <div className="card-label">Fixed target image</div>
+            <TargetThumb src={meta.targetAsset} name={meta.targetName} large />
+            <div className="target-name"><strong>{meta.targetName}</strong><span>{meta.targetAsset ? "Exact archived stimulus" : meta.targetAssetStatus}</span></div>
+            <dl className="meta-list">
+              <MetaRow label="Objective" value={meta.objective} />
+              <MetaRow label="Area" value={meta.area} />
+              <MetaRow label="Generator" value={meta.generator} />
+              <MetaRow label="Baseline" value={humanBaseline(meta.baselineMode)} />
+              <MetaRow label="Evoked window" value={`${meta.responseWindowSeconds[0] * 1000}–${meta.responseWindowSeconds[1] * 1000} ms`} />
+              <MetaRow label="Image aperture" value={finite(meta.imageSizeDegrees) ? `${meta.imageSizeDegrees}°` : "—"} />
+              <MetaRow label="Reference session" value={meta.targetSourceSession || "not image-resolved"} />
+            </dl>
+          </section>
 
-        <GeneratedStimulusCard
-          gallery={detail.generationStimuli}
-          generation={stimulusGeneration}
-          sample={selectedStimulus}
-          choice={stimulusChoice}
-          topRank={topRank}
-          onChoice={setStimulusChoice}
-          onTopRank={setTopRank}
-        />
+          <GeneratedStimulusCard
+            gallery={detail.generationStimuli}
+            generation={stimulusGeneration}
+            sample={selectedStimulus}
+            choice={stimulusChoice}
+            topRank={topRank}
+            onChoice={setStimulusChoice}
+            onTopRank={setTopRank}
+          />
+        </div>
 
         <section className="card objective-card">
           <div className="card-title-row"><div><div className="panel-letter">A</div><div><h3>Optimized objective</h3><p>Exact per-image score, summarized by generation</p></div></div><StatusBadge success={status.trajectorySuccess} label={`composite q ${number(status.trajectoryQ, 3)}`} compact /></div>
