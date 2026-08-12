@@ -226,6 +226,46 @@ function generationColor(index: number, total: number) {
   return GENERATION_COLORS[Math.min(GENERATION_COLORS.length - 1, Math.round(scaled))];
 }
 
+type HeatmapColorDomain = {
+  low: number;
+  midpoint: number;
+  high: number;
+  symmetric: boolean;
+};
+
+function quantile(sorted: number[], probability: number) {
+  if (!sorted.length) return 0;
+  const index = Math.min(sorted.length - 1, Math.max(0, Math.floor(sorted.length * probability)));
+  return sorted[index];
+}
+
+function heatmapColorDomain(matrix: (number | null)[][], scale: ActivityScale): HeatmapColorDomain {
+  const values = matrix.flat().filter(finite).sort((a, b) => a - b);
+  if (scale === "raw") {
+    let low = quantile(values, 0.02), high = quantile(values, 0.98);
+    if (!finite(low) || !finite(high) || low === high) {
+      low = values[0] ?? 0;
+      high = values.at(-1) ?? 1;
+    }
+    if (low === high) high = low + 1;
+    return { low, midpoint: (low + high) / 2, high, symmetric: false };
+  }
+  const magnitudes = values.map(Math.abs).sort((a, b) => a - b);
+  const limit = quantile(magnitudes, 0.98) || 1;
+  return { low: -limit, midpoint: 0, high: limit, symmetric: true };
+}
+
+function heatmapColor(value: number, domain: HeatmapColorDomain) {
+  const denominator = value <= domain.midpoint
+    ? domain.midpoint - domain.low
+    : domain.high - domain.midpoint;
+  const strength = Math.max(0, Math.min(1, Math.abs(value - domain.midpoint) / Math.max(denominator, 1e-12)));
+  if (value >= domain.midpoint) {
+    return `rgb(${Math.round(246 - strength * 34)},${Math.round(246 - strength * 167)},${Math.round(246 - strength * 142)})`;
+  }
+  return `rgb(${Math.round(246 - strength * 168)},${Math.round(246 - strength * 141)},${Math.round(246 - strength * 28)})`;
+}
+
 function publicUrl(path: string) {
   return path.startsWith("/") ? `${PUBLIC_BASE}${path}` : path;
 }
@@ -729,8 +769,7 @@ function PopulationHeatmap({ population, scale, selected, onSelect }: { populati
   const view = useMemo(() => activityView(population, scale), [population, scale]);
   const matrix = useMemo(() => [view.target, ...view.means], [view]);
   const scaleInfo = ACTIVITY_SCALE_INFO[scale];
-  const finiteValues = matrix.flat().filter(finite).map(Math.abs).sort((a, b) => a - b);
-  const limit = finiteValues[Math.floor(finiteValues.length * 0.98)] || 1;
+  const colorDomain = useMemo(() => heatmapColorDomain(matrix, scale), [matrix, scale]);
   const rows = population.units?.length || 0, cols = matrix.length;
   const height = Math.max(220, Math.min(430, rows * 10));
   const draw = useCallback(() => {
@@ -750,13 +789,7 @@ function PopulationHeatmap({ population, scale, selected, onSelect }: { populati
         context.fillRect(col * cellWidth, row * cellHeight, Math.ceil(cellWidth) + 0.5, Math.ceil(cellHeight) + 0.5);
         return;
       }
-      const normalized = Math.max(-1, Math.min(1, value / limit));
-      if (normalized >= 0) {
-        context.fillStyle = `rgb(${Math.round(246 - normalized * 34)},${Math.round(246 - normalized * 167)},${Math.round(246 - normalized * 142)})`;
-      } else {
-        const strength = -normalized;
-        context.fillStyle = `rgb(${Math.round(246 - strength * 168)},${Math.round(246 - strength * 141)},${Math.round(246 - strength * 28)})`;
-      }
+      context.fillStyle = heatmapColor(value, colorDomain);
       context.fillRect(col * cellWidth, row * cellHeight, Math.ceil(cellWidth) + 0.5, Math.ceil(cellHeight) + 0.5);
     }));
     context.strokeStyle = "#08131c";
@@ -765,7 +798,7 @@ function PopulationHeatmap({ population, scale, selected, onSelect }: { populati
     context.strokeStyle = "rgba(255,255,255,.9)";
     context.lineWidth = 2;
     context.strokeRect((selected + 1) * cellWidth + 1, 1, Math.max(1, cellWidth - 2), height - 2);
-  }, [matrix, rows, cols, height, limit, selected]);
+  }, [matrix, rows, cols, height, colorDomain, selected]);
   useEffect(() => { draw(); window.addEventListener("resize", draw); return () => window.removeEventListener("resize", draw); }, [draw]);
   const locate = (clientX: number, clientY: number) => {
     const rect = canvasRef.current!.getBoundingClientRect();
@@ -777,7 +810,7 @@ function PopulationHeatmap({ population, scale, selected, onSelect }: { populati
     <div className="heatmap-wrap">
       <div className="heatmap-labels"><span>{scale === "delta_g0" ? "target − g0" : "fixed target"}</span><span>{scale === "delta_g0" ? "generation change from g0 →" : "generation means →"}</span></div>
       <canvas ref={canvasRef} style={{ height }} onMouseMove={(event) => setHover(locate(event.clientX, event.clientY))} onMouseLeave={() => setHover(null)} onClick={(event) => { const point = locate(event.clientX, event.clientY); if (point.col > 0) onSelect(point.col - 1); }} aria-label={`${scaleInfo.title} population heatmap with ${rows} units and ${cols - 1} generations`} role="img" />
-      <div className="heatmap-footer"><div className="color-key"><span>−{number(limit, 1)}</span><i /><span>0</span><b /><span>+{number(limit, 1)}</span><em title="Reference SD unavailable">n/a</em></div><div className="heatmap-readout">{hover && hoverUnit ? `${hoverUnit.label} · ${hover.col === 0 ? "target" : `g${hover.col - 1}`} · ${number(hoverValue, 3)}` : `${scaleInfo.yLabel} · symmetric 98% color range`}</div></div>
+      <div className="heatmap-footer"><div className="color-key"><span>{number(colorDomain.low, 1)}</span><i /><span>{number(colorDomain.midpoint, 1)}</span><b /><span>{number(colorDomain.high, 1)}</span><em title="Reference SD unavailable">n/a</em></div><div className="heatmap-readout">{hover && hoverUnit ? `${hoverUnit.label} · ${hover.col === 0 ? "target" : `g${hover.col - 1}`} · ${number(hoverValue, 3)}` : `${scaleInfo.yLabel} · ${colorDomain.symmetric ? "zero-centered symmetric 98% color range" : "2–98% activation range; white = range midpoint"}`}</div></div>
     </div>
   );
 }
