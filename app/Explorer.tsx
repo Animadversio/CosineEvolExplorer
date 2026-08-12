@@ -141,6 +141,7 @@ type ThreadDetail = {
 const ANIMALS = ["All", "Alfa", "Beto", "Caos", "Diablito"];
 const BEST_CASE = "Beto-02032022-005#thread000";
 const GENERATION_COLORS = ["#440154", "#414487", "#2a788e", "#22a884", "#7ad151", "#fde725"];
+const PUBLIC_BASE = import.meta.env.BASE_URL === "/" ? "" : import.meta.env.BASE_URL.replace(/\/$/, "");
 type ActivityScale = "raw" | "reference_z" | "delta_g0";
 
 const ACTIVITY_SCALE_INFO = {
@@ -199,6 +200,10 @@ function generationColor(index: number, total: number) {
   return GENERATION_COLORS[Math.min(GENERATION_COLORS.length - 1, Math.round(scaled))];
 }
 
+function publicUrl(path: string) {
+  return path.startsWith("/") ? `${PUBLIC_BASE}${path}` : path;
+}
+
 function subtractVectors(values: (number | null)[], baseline: (number | null)[]) {
   return values.map((value, index) => finite(value) && finite(baseline[index]) ? value - baseline[index]! : null);
 }
@@ -247,7 +252,7 @@ export default function Explorer() {
   const [statusFilter, setStatusFilter] = useState("All runs");
 
   useEffect(() => {
-    fetch("/data/index.json")
+    fetch(publicUrl("/data/index.json"))
       .then((response) => {
         if (!response.ok) throw new Error(`index request failed (${response.status})`);
         return response.json();
@@ -272,7 +277,7 @@ export default function Explorer() {
   useEffect(() => {
     if (!selectedSummary) return;
     let alive = true;
-    fetch(selectedSummary.detail)
+    fetch(publicUrl(selectedSummary.detail))
       .then((response) => {
         if (!response.ok) throw new Error(`thread request failed (${response.status})`);
         return response.json();
@@ -433,7 +438,7 @@ function ThreadCard({ row, selected, onSelect }: { row: ThreadSummary; selected:
 
 function TargetThumb({ src, name, large = false }: { src: string | null; name: string; large?: boolean }) {
   const [failed, setFailed] = useState(false);
-  if (src && !failed) return <img className={large ? "target-image" : "target-thumb"} src={src} alt={`Target image: ${name}`} loading={large ? "eager" : "lazy"} onError={() => setFailed(true)} />;
+  if (src && !failed) return <img className={large ? "target-image" : "target-thumb"} src={publicUrl(src)} alt={`Target image: ${name}`} loading={large ? "eager" : "lazy"} onError={() => setFailed(true)} />;
   return <span className={large ? "target-placeholder large" : "target-placeholder"} aria-label={`Target image unavailable: ${name}`}><span>{name.slice(0, 2).toUpperCase()}</span></span>;
 }
 
