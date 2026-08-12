@@ -1,0 +1,613 @@
+"use client";
+
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+
+type ThreadSummary = {
+  key: string;
+  ephysFN: string;
+  threadId0: number;
+  animal: string;
+  date: string;
+  objective: string;
+  scoreFamily: string;
+  area: string;
+  generator: string;
+  baselineMode: string | null;
+  targetName: string;
+  targetAsset: string | null;
+  analysisReady: boolean;
+  excluded: boolean;
+  exclusionReason: string | null;
+  q1bEligible: boolean;
+  trajectorySuccess: boolean | null;
+  trajectoryQ: number | null;
+  selectedShape: string | null;
+  nGenerations: number;
+  populationAvailable: boolean;
+  detail: string;
+};
+
+type ExplorerIndex = {
+  schemaVersion: string;
+  title: string;
+  summary: {
+    sessions: number;
+    threads: number;
+    analysisReady: number;
+    populationAvailable: number;
+    trajectorySuccess: number;
+    targetAssetsResolved: number;
+  };
+  threads: ThreadSummary[];
+};
+
+type TrajectoryPoint = {
+  generation: number;
+  block: number;
+  nImages: number;
+  scoreMean: number;
+  scoreSem: number | null;
+  fittedScore: number | null;
+  linearScore: number | null;
+  improvementEarlyImageSd: number | null;
+  fractionToIdealCeiling: number | null;
+  cosine: number | null;
+  normRatio: number | null;
+  normalizedDistance: number | null;
+  projectionRatio: number | null;
+  residualPc1: number | null;
+};
+
+type PopulationData = {
+  availability: "available" | "unavailable";
+  reason?: string | null;
+  geometryFrame?: string;
+  geometryExact?: boolean;
+  units?: { index: number; channel: number; unitSlot: number; label: string }[];
+  targetFrame?: number[];
+  targetRawHz?: number[];
+  meanFrame?: number[][];
+  semFrame?: (number | null)[][];
+  meanRawHz?: number[][];
+  semRawHz?: (number | null)[][];
+  trajectory?: TrajectoryPoint[];
+  scoreScaleEarlyImageSd?: number | null;
+  objectiveIdealCeiling?: number | null;
+  targetReference?: {
+    score: number | null;
+    cosine: number | null;
+    normRatio: number | null;
+    normalizedDistance: number | null;
+  }[];
+  referenceAvailable?: boolean;
+  referenceSource?: Record<string, unknown>;
+  validation?: Record<string, number>;
+};
+
+type ThreadDetail = {
+  schemaVersion: string;
+  key: string;
+  metadata: {
+    ephysFN: string;
+    threadId0: number;
+    nThreads: number;
+    animal: string;
+    date: string;
+    objective: string;
+    scoreFamily: string;
+    area: string;
+    generator: string;
+    optimizer: string;
+    baselineMode: string;
+    responseWindowSeconds: [number, number];
+    baselineWindowSeconds: [number, number];
+    targetName: string;
+    targetResponseTensor: string;
+    targetAsset: string | null;
+    targetAssetStatus: string;
+    targetMatchBasis: string;
+    targetSourceSession: string | null;
+    imageSizeDegrees: number | null;
+    imagePositionDegrees: [number, number];
+    nObjectiveUnits: number | null;
+    comments: string | null;
+  };
+  status: {
+    analysisReady: boolean;
+    excluded: boolean;
+    exclusionReason: string | null;
+    q1bEligible: boolean;
+    q1bIneligibilityReason: string | null;
+    endpointDifference: number | null;
+    endpointPositive: boolean | null;
+    trajectorySuccess: boolean | null;
+    trajectoryQ: number | null;
+    linearDetected: boolean | null;
+    saturationDetected: boolean | null;
+    selectedShape: string | null;
+    selectedTau: number | null;
+    q2Eligible: boolean;
+    q2ReachedDelta0p2: boolean | null;
+    q2StandardizedDeficit: number | null;
+  };
+  population: PopulationData;
+};
+
+const ANIMALS = ["All", "Alfa", "Beto", "Caos", "Diablito"];
+const BEST_CASE = "Beto-02032022-005#thread000";
+const GENERATION_COLORS = ["#440154", "#414487", "#2a788e", "#22a884", "#7ad151", "#fde725"];
+
+function finite(value: number | null | undefined): value is number {
+  return value != null && Number.isFinite(value);
+}
+
+function number(value: number | null | undefined, digits = 2) {
+  if (!finite(value)) return "—";
+  const magnitude = Math.abs(value);
+  if (magnitude > 999 || (magnitude > 0 && magnitude < 0.001)) return value.toExponential(2);
+  return value.toFixed(digits);
+}
+
+function humanBaseline(value: string | null | undefined) {
+  if (value === "blockwise") return "block-wise subtraction";
+  if (value === "trialwise") return "trial-wise subtraction";
+  if (value === "none") return "no subtraction";
+  return value || "unresolved";
+}
+
+function generationColor(index: number, total: number) {
+  if (total <= 1) return GENERATION_COLORS[3];
+  const scaled = (index / (total - 1)) * (GENERATION_COLORS.length - 1);
+  return GENERATION_COLORS[Math.min(GENERATION_COLORS.length - 1, Math.round(scaled))];
+}
+
+export default function Explorer() {
+  const [index, setIndex] = useState<ExplorerIndex | null>(null);
+  const [indexError, setIndexError] = useState<string | null>(null);
+  const [detail, setDetail] = useState<ThreadDetail | null>(null);
+  const [selectedKey, setSelectedKey] = useState(BEST_CASE);
+  const [selectedGeneration, setSelectedGeneration] = useState(0);
+  const [search, setSearch] = useState("");
+  const [animal, setAnimal] = useState("All");
+  const [family, setFamily] = useState("All objectives");
+  const [statusFilter, setStatusFilter] = useState("All runs");
+
+  useEffect(() => {
+    fetch("/data/index.json")
+      .then((response) => {
+        if (!response.ok) throw new Error(`index request failed (${response.status})`);
+        return response.json();
+      })
+      .then((payload: ExplorerIndex) => {
+        setIndex(payload);
+        const requested = new URLSearchParams(window.location.search).get("thread");
+        if (requested && payload.threads.some((row) => row.key === requested)) {
+          setSelectedKey(requested);
+        } else if (!payload.threads.some((row) => row.key === BEST_CASE)) {
+          setSelectedKey(payload.threads[0]?.key || "");
+        }
+      })
+      .catch((error) => setIndexError(String(error)));
+  }, []);
+
+  const selectedSummary = useMemo(
+    () => index?.threads.find((row) => row.key === selectedKey) || null,
+    [index, selectedKey],
+  );
+
+  useEffect(() => {
+    if (!selectedSummary) return;
+    let alive = true;
+    fetch(selectedSummary.detail)
+      .then((response) => {
+        if (!response.ok) throw new Error(`thread request failed (${response.status})`);
+        return response.json();
+      })
+      .then((payload: ThreadDetail) => {
+        if (!alive) return;
+        setDetail(payload);
+        setSelectedGeneration(0);
+        const url = new URL(window.location.href);
+        url.searchParams.set("thread", payload.key);
+        window.history.replaceState(null, "", url);
+      })
+      .catch(() => alive && setDetail(null));
+    return () => { alive = false; };
+  }, [selectedSummary]);
+
+  const families = useMemo(() => {
+    const values = [...new Set(index?.threads.map((row) => row.scoreFamily) || [])].sort();
+    return ["All objectives", ...values];
+  }, [index]);
+
+  const filteredThreads = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    return (index?.threads || []).filter((row) => {
+      if (animal !== "All" && row.animal !== animal) return false;
+      if (family !== "All objectives" && row.scoreFamily !== family) return false;
+      if (statusFilter === "Detected" && row.trajectorySuccess !== true) return false;
+      if (statusFilter === "Not detected" && row.trajectorySuccess !== false) return false;
+      if (statusFilter === "Unavailable" && row.populationAvailable) return false;
+      if (query && !`${row.key} ${row.targetName} ${row.objective} ${row.area}`.toLowerCase().includes(query)) return false;
+      return true;
+    });
+  }, [index, animal, family, statusFilter, search]);
+
+  const selectThread = useCallback((key: string) => {
+    setSelectedKey(key);
+    if (window.innerWidth < 980) document.getElementById("thread-detail")?.scrollIntoView({ behavior: "smooth" });
+  }, []);
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (!detail?.population.trajectory?.length || event.target instanceof HTMLInputElement || event.target instanceof HTMLSelectElement) return;
+      if (event.key === "ArrowLeft") setSelectedGeneration((value) => Math.max(0, value - 1));
+      if (event.key === "ArrowRight") setSelectedGeneration((value) => Math.min(detail.population.trajectory!.length - 1, value + 1));
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [detail]);
+
+  if (indexError) return <div className="fatal">Could not load the explorer data. {indexError}</div>;
+  if (!index) return <LoadingScreen />;
+
+  return (
+    <div className="app-shell">
+      <header className="topbar">
+        <div className="brand-mark" aria-hidden="true"><span /><span /><span /></div>
+        <div className="brand-copy">
+          <h1>Cosine Evolution</h1>
+          <p>Population control dataset explorer</p>
+        </div>
+        <div className="topbar-stats" aria-label="Dataset summary">
+          <span><strong>{index.summary.sessions}</strong> sessions</span>
+          <span><strong>{index.summary.threads}</strong> thread-runs</span>
+          <span><strong>4</strong> animals</span>
+          <span><strong>{index.summary.populationAvailable}</strong> vector trajectories</span>
+        </div>
+      </header>
+
+      <section className="intro-strip">
+        <div>
+          <p className="eyebrow">Closed-loop neural population optimization</p>
+          <h2>Did evolution move the measured response toward its target?</h2>
+        </div>
+        <p>
+          Explore each experiment from its exact task metadata and target image through the
+          optimized objective and the channel-by-channel population trajectory.
+        </p>
+      </section>
+
+      <main className="workspace">
+        <aside className="browser" aria-label="Experiment browser">
+          <div className="browser-head">
+            <div>
+              <p className="eyebrow">Experiment browser</p>
+              <h3>{filteredThreads.length} of {index.summary.threads} threads</h3>
+            </div>
+            <button className="reset-button" onClick={() => { setSearch(""); setAnimal("All"); setFamily("All objectives"); setStatusFilter("All runs"); }}>Reset</button>
+          </div>
+          <label className="search-box">
+            <span className="sr-only">Search experiments</span>
+            <span aria-hidden="true">⌕</span>
+            <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Session, target, objective…" />
+          </label>
+          <div className="filter-group">
+            <span className="filter-label">Animal</span>
+            <div className="pill-row">
+              {ANIMALS.map((value) => <button key={value} className={animal === value ? "pill active" : "pill"} onClick={() => setAnimal(value)}>{value}</button>)}
+            </div>
+          </div>
+          <div className="filter-grid">
+            <label>
+              <span className="filter-label">Objective</span>
+              <select value={family} onChange={(event) => setFamily(event.target.value)}>
+                {families.map((value) => <option key={value}>{value}</option>)}
+              </select>
+            </label>
+            <label>
+              <span className="filter-label">Trajectory call</span>
+              <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
+                {['All runs', 'Detected', 'Not detected', 'Unavailable'].map((value) => <option key={value}>{value}</option>)}
+              </select>
+            </label>
+          </div>
+          <div className="thread-list">
+            {filteredThreads.map((row) => (
+              <ThreadCard key={row.key} row={row} selected={row.key === selectedKey} onSelect={selectThread} />
+            ))}
+            {!filteredThreads.length && <div className="empty-list">No experiments match these filters.</div>}
+          </div>
+        </aside>
+
+        <section id="thread-detail" className="detail-column">
+          {!detail || detail.key !== selectedKey ? <DetailSkeleton /> : (
+            <ThreadView key={detail.key} detail={detail} selectedGeneration={selectedGeneration} setSelectedGeneration={setSelectedGeneration} />
+          )}
+        </section>
+      </main>
+
+      <footer>
+        <span>Cosine Evolution Dataset Explorer</span>
+        <span>Exact objectives · explicit baselines · provenance-linked caches</span>
+      </footer>
+    </div>
+  );
+}
+
+function LoadingScreen() {
+  return <div className="loading-screen" role="status"><div className="brand-mark large"><span /><span /><span /></div><p>Loading 309 experiment records…</p></div>;
+}
+
+function DetailSkeleton() {
+  return <div className="detail-skeleton" aria-label="Loading selected experiment"><div /><div /><div /></div>;
+}
+
+function ThreadCard({ row, selected, onSelect }: { row: ThreadSummary; selected: boolean; onSelect: (key: string) => void }) {
+  return (
+    <button className={selected ? "thread-card selected" : "thread-card"} onClick={() => onSelect(row.key)} aria-pressed={selected}>
+      <TargetThumb src={row.targetAsset} name={row.targetName} />
+      <span className="thread-card-copy">
+        <span className="thread-id">{row.ephysFN}{row.threadId0 ? ` · T${row.threadId0}` : ""}</span>
+        <span className="thread-target">{row.targetName}</span>
+        <span className="thread-meta">{row.objective} · {row.generator} · {row.nGenerations || "—"} gen</span>
+      </span>
+      <span className={`call-dot ${row.trajectorySuccess === true ? "success" : row.trajectorySuccess === false ? "neutral" : "missing"}`} title={row.trajectorySuccess === true ? "trajectory detected" : row.trajectorySuccess === false ? "not detected" : "unavailable"} />
+    </button>
+  );
+}
+
+function TargetThumb({ src, name, large = false }: { src: string | null; name: string; large?: boolean }) {
+  const [failed, setFailed] = useState(false);
+  if (src && !failed) return <img className={large ? "target-image" : "target-thumb"} src={src} alt={`Target image: ${name}`} loading={large ? "eager" : "lazy"} onError={() => setFailed(true)} />;
+  return <span className={large ? "target-placeholder large" : "target-placeholder"} aria-label={`Target image unavailable: ${name}`}><span>{name.slice(0, 2).toUpperCase()}</span></span>;
+}
+
+function ThreadView({ detail, selectedGeneration, setSelectedGeneration }: { detail: ThreadDetail; selectedGeneration: number; setSelectedGeneration: (value: number) => void }) {
+  const { metadata: meta, status, population } = detail;
+  const trajectory = population.trajectory || [];
+  const selected = trajectory[selectedGeneration] || null;
+  return (
+    <>
+      <div className="thread-heading">
+        <div>
+          <div className="breadcrumb"><span>{meta.animal}</span><span>/</span><span>{meta.date}</span><span>/</span><span>thread {String(meta.threadId0).padStart(3, "0")}</span></div>
+          <h2>{meta.ephysFN}</h2>
+          <p>{meta.objective} · {meta.nObjectiveUnits ?? "—"} objective-relevant units · {trajectory.length || "—"} generations</p>
+        </div>
+        <div className="status-cluster">
+          <StatusBadge success={status.trajectorySuccess} label={status.trajectorySuccess ? "trajectory detected" : status.q1bEligible ? "not detected" : "not eligible"} />
+          <span className="method-badge">{status.selectedShape || "no fit"}</span>
+        </div>
+      </div>
+
+      <div className="hero-grid">
+        <section className="card target-card">
+          <div className="card-label">Fixed target image</div>
+          <TargetThumb src={meta.targetAsset} name={meta.targetName} large />
+          <div className="target-name"><strong>{meta.targetName}</strong><span>{meta.targetAsset ? "Exact archived stimulus" : meta.targetAssetStatus}</span></div>
+          <dl className="meta-list">
+            <MetaRow label="Objective" value={meta.objective} />
+            <MetaRow label="Area" value={meta.area} />
+            <MetaRow label="Generator" value={meta.generator} />
+            <MetaRow label="Baseline" value={humanBaseline(meta.baselineMode)} />
+            <MetaRow label="Evoked window" value={`${meta.responseWindowSeconds[0] * 1000}–${meta.responseWindowSeconds[1] * 1000} ms`} />
+            <MetaRow label="Image aperture" value={finite(meta.imageSizeDegrees) ? `${meta.imageSizeDegrees}°` : "—"} />
+            <MetaRow label="Reference session" value={meta.targetSourceSession || "not image-resolved"} />
+          </dl>
+        </section>
+
+        <section className="card objective-card">
+          <div className="card-title-row"><div><div className="panel-letter">A</div><div><h3>Optimized objective</h3><p>Exact per-image score, summarized by generation</p></div></div><StatusBadge success={status.trajectorySuccess} label={`composite q ${number(status.trajectoryQ, 3)}`} compact /></div>
+          {population.availability === "available" ? (
+            <ObjectiveChart population={population} selected={selectedGeneration} onSelect={setSelectedGeneration} />
+          ) : <Unavailable reason={population.reason} />}
+        </section>
+      </div>
+
+      {population.availability === "available" && selected && (
+        <div className="generation-control">
+          <button onClick={() => setSelectedGeneration(Math.max(0, selectedGeneration - 1))} disabled={selectedGeneration === 0} aria-label="Previous generation">←</button>
+          <div><span>Selected generation</span><strong>g{selected.generation}</strong><em>{selected.nImages} images · score {number(selected.scoreMean, 3)}</em></div>
+          <input aria-label="Selected generation" type="range" min={0} max={trajectory.length - 1} value={selectedGeneration} onChange={(event) => setSelectedGeneration(Number(event.target.value))} />
+          <button onClick={() => setSelectedGeneration(Math.min(trajectory.length - 1, selectedGeneration + 1))} disabled={selectedGeneration === trajectory.length - 1} aria-label="Next generation">→</button>
+        </div>
+      )}
+
+      {population.availability === "available" ? (
+        <>
+          <div className="two-column-grid">
+            <section className="card heatmap-card">
+              <PanelTitle letter="B" title="Population activity" subtitle={`Fixed target and generation means · ${population.geometryFrame}`} />
+              <PopulationHeatmap population={population} selected={selectedGeneration} onSelect={setSelectedGeneration} />
+            </section>
+            <section className="card geometry-card">
+              <PanelTitle letter="C" title="Distance to target" subtitle="Pattern alignment, gain, and residual error" />
+              <GeometryTraces trajectory={trajectory} selected={selectedGeneration} onSelect={setSelectedGeneration} />
+            </section>
+          </div>
+          <div className="two-column-grid lower-grid">
+            <section className="card path-card">
+              <PanelTitle letter="D" title="Population-vector path" subtitle="Target projection × dominant residual axis" />
+              <VectorPath trajectory={trajectory} selected={selectedGeneration} onSelect={setSelectedGeneration} />
+            </section>
+            <section className="card profile-card">
+              <PanelTitle letter="E" title={`Activity profile at g${selected?.generation ?? 0}`} subtitle="Generation mean compared with the fixed online target" />
+              <ProfileChart population={population} selected={selectedGeneration} />
+            </section>
+          </div>
+        </>
+      ) : (
+        <section className="card unavailable-card"><PanelTitle letter="B–E" title="Population trajectory unavailable" subtitle="The run remains in the registry" /><Unavailable reason={population.reason || status.q1bIneligibilityReason} /></section>
+      )}
+
+      <section className="card provenance-card">
+        <div><p className="eyebrow">Interpretation guardrails</p><h3>What these panels mean</h3></div>
+        <div className="guardrail-grid">
+          <p><strong>Black points</strong> are means of exact per-image objective scores. They are not the score of the generation-mean vector.</p>
+          <p><strong>Fixed target</strong> is the population vector used online. Empirical repeat trials, when present, are a separate reference.</p>
+          <p><strong>Population frame</strong> is {population.geometryExact ? "the exact objective operand frame" : "a descriptive common frame"}; baseline handling is {humanBaseline(meta.baselineMode)}.</p>
+        </div>
+        {meta.comments && <details><summary>Operator notes from the experimental registry</summary><p>{meta.comments}</p></details>}
+      </section>
+    </>
+  );
+}
+
+function StatusBadge({ success, label, compact = false }: { success: boolean | null; label: string; compact?: boolean }) {
+  return <span className={`status-badge ${success === true ? "success" : success === false ? "neutral" : "missing"} ${compact ? "compact" : ""}`}><i />{label}</span>;
+}
+
+function MetaRow({ label, value }: { label: string; value: string }) {
+  return <div><dt>{label}</dt><dd>{value}</dd></div>;
+}
+
+function PanelTitle({ letter, title, subtitle }: { letter: string; title: string; subtitle: string }) {
+  return <div className="panel-title"><div className="panel-letter">{letter}</div><div><h3>{title}</h3><p>{subtitle}</p></div></div>;
+}
+
+function Unavailable({ reason }: { reason?: string | null }) {
+  return <div className="unavailable"><span>∅</span><div><strong>No validated data for this panel</strong><p>{reason || "This run was not eligible for the current scientific cache."}</p></div></div>;
+}
+
+function ObjectiveChart({ population, selected, onSelect }: { population: PopulationData; selected: number; onSelect: (value: number) => void }) {
+  const [mode, setMode] = useState<"native" | "standardized" | "ceiling">("native");
+  const trajectory = population.trajectory || [];
+  const modes = [
+    { id: "native" as const, label: "Native score", available: true },
+    { id: "standardized" as const, label: "From g0 (early image SD)", available: finite(population.scoreScaleEarlyImageSd) },
+    { id: "ceiling" as const, label: "Fraction to ideal", available: trajectory.some((row) => finite(row.fractionToIdealCeiling)) },
+  ];
+  const width = 820, height = 310, left = 64, right = 18, top = 22, bottom = 52;
+  const values = trajectory.map((point) => mode === "native" ? point.scoreMean : mode === "standardized" ? point.improvementEarlyImageSd : point.fractionToIdealCeiling);
+  const sems = trajectory.map((point) => mode === "native" ? point.scoreSem : mode === "standardized" && finite(point.scoreSem) && finite(population.scoreScaleEarlyImageSd) ? point.scoreSem / population.scoreScaleEarlyImageSd : null);
+  const fitted = trajectory.map((point) => mode === "native" ? point.fittedScore : mode === "standardized" && finite(point.fittedScore) && finite(population.scoreScaleEarlyImageSd) ? (point.fittedScore - trajectory[0].scoreMean) / population.scoreScaleEarlyImageSd : mode === "ceiling" ? null : null);
+  const linear = trajectory.map((point) => mode === "native" ? point.linearScore : mode === "standardized" && finite(point.linearScore) && finite(population.scoreScaleEarlyImageSd) ? (point.linearScore - trajectory[0].scoreMean) / population.scoreScaleEarlyImageSd : null);
+  const rangeValues = [...values, ...values.map((value, index) => finite(value) && finite(sems[index]) ? value + sems[index]! : null), ...values.map((value, index) => finite(value) && finite(sems[index]) ? value - sems[index]! : null), ...fitted, ...linear].filter(finite);
+  let yMin = Math.min(...rangeValues), yMax = Math.max(...rangeValues);
+  if (!Number.isFinite(yMin) || yMin === yMax) { yMin = -1; yMax = 1; }
+  const pad = (yMax - yMin) * 0.12;
+  yMin -= pad; yMax += pad;
+  const maxGen = Math.max(...trajectory.map((point) => point.generation), 1);
+  const x = (generation: number) => left + (generation / maxGen) * (width - left - right);
+  const y = (value: number) => top + ((yMax - value) / (yMax - yMin)) * (height - top - bottom);
+  const path = (series: (number | null)[]) => series.map((value, index) => finite(value) ? `${index ? "L" : "M"}${x(trajectory[index].generation).toFixed(1)},${y(value).toFixed(1)}` : "").join(" ");
+  const yTicks = Array.from({ length: 5 }, (_, index) => yMin + (index / 4) * (yMax - yMin));
+  const yLabel = mode === "native" ? "exact objective score" : mode === "standardized" ? "improvement / early image SD" : "fraction from g0 to ideal";
+  return (
+    <div className="chart-wrap">
+      <div className="segmented-control" aria-label="Objective scale">{modes.map((item) => <button key={item.id} disabled={!item.available} className={mode === item.id ? "active" : ""} onClick={() => item.available && setMode(item.id)}>{item.label}</button>)}</div>
+      <svg className="objective-chart" viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`Objective trajectory in ${yLabel}`}>
+        {yTicks.map((tick) => <g key={tick}><line x1={left} x2={width - right} y1={y(tick)} y2={y(tick)} className="gridline" /><text x={left - 10} y={y(tick) + 4} textAnchor="end" className="axis-label">{number(tick, 2)}</text></g>)}
+        <line x1={left} x2={width - right} y1={height - bottom} y2={height - bottom} className="axis" />
+        <line x1={left} x2={left} y1={top} y2={height - bottom} className="axis" />
+        {fitted.some(finite) && <path d={path(fitted)} className="fit-line" />}
+        {linear.some(finite) && <path d={path(linear)} className="linear-line" />}
+        {trajectory.map((point, index) => finite(values[index]) && <g key={point.generation} className="data-point" onClick={() => onSelect(index)} tabIndex={0} role="button" aria-label={`Generation ${point.generation}, score ${number(values[index], 3)}`} onKeyDown={(event) => (event.key === "Enter" || event.key === " ") && onSelect(index)}>
+          {finite(sems[index]) && <line x1={x(point.generation)} x2={x(point.generation)} y1={y(values[index]! - sems[index]!)} y2={y(values[index]! + sems[index]!)} className="errorbar" />}
+          <circle cx={x(point.generation)} cy={y(values[index]!)} r={index === selected ? 6.5 : 3.7} className={index === selected ? "raw-point selected" : "raw-point"} />
+        </g>)}
+        {Array.from({ length: 6 }, (_, index) => Math.round((index / 5) * maxGen)).map((tick) => <text key={tick} x={x(tick)} y={height - bottom + 24} textAnchor="middle" className="axis-label">{tick}</text>)}
+        <text x={(left + width - right) / 2} y={height - 8} textAnchor="middle" className="axis-title">CMA-ES generation</text>
+        <text transform={`translate(16 ${(top + height - bottom) / 2}) rotate(-90)`} textAnchor="middle" className="axis-title">{yLabel}</text>
+      </svg>
+      <div className="chart-legend"><span><i className="dot black" />generation mean ± SEM</span>{fitted.some(finite) && <span><i className="line indigo" />selected saturation fit</span>}{linear.some(finite) && <span><i className="line amber" />canonical linear fit</span>}</div>
+    </div>
+  );
+}
+
+function PopulationHeatmap({ population, selected, onSelect }: { population: PopulationData; selected: number; onSelect: (value: number) => void }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [hover, setHover] = useState<{ row: number; col: number } | null>(null);
+  const matrix = useMemo(() => [population.targetFrame || [], ...(population.meanFrame || [])], [population]);
+  const finiteValues = matrix.flat().filter(finite).map(Math.abs).sort((a, b) => a - b);
+  const limit = finiteValues[Math.floor(finiteValues.length * 0.98)] || 1;
+  const rows = population.units?.length || 0, cols = matrix.length;
+  const height = Math.max(220, Math.min(430, rows * 10));
+  const draw = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || !rows || !cols) return;
+    const ratio = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
+    canvas.width = Math.max(1, Math.round(rect.width * ratio));
+    canvas.height = Math.round(height * ratio);
+    const context = canvas.getContext("2d");
+    if (!context) return;
+    context.scale(ratio, ratio);
+    const cellWidth = rect.width / cols, cellHeight = height / rows;
+    matrix.forEach((column, col) => column.forEach((value, row) => {
+      const normalized = Math.max(-1, Math.min(1, (value || 0) / limit));
+      if (normalized >= 0) {
+        const fade = Math.round(246 - normalized * 168);
+        context.fillStyle = `rgb(${fade},${Math.round(fade + normalized * 8)},${Math.round(246 - normalized * 28)})`;
+      } else {
+        const strength = -normalized;
+        context.fillStyle = `rgb(${Math.round(246 - strength * 34)},${Math.round(246 - strength * 118)},${Math.round(246 - strength * 142)})`;
+      }
+      context.fillRect(col * cellWidth, row * cellHeight, Math.ceil(cellWidth) + 0.5, Math.ceil(cellHeight) + 0.5);
+    }));
+    context.strokeStyle = "#08131c";
+    context.lineWidth = 2;
+    context.beginPath(); context.moveTo(cellWidth, 0); context.lineTo(cellWidth, height); context.stroke();
+    context.strokeStyle = "rgba(255,255,255,.9)";
+    context.lineWidth = 2;
+    context.strokeRect((selected + 1) * cellWidth + 1, 1, Math.max(1, cellWidth - 2), height - 2);
+  }, [matrix, rows, cols, height, limit, selected]);
+  useEffect(() => { draw(); window.addEventListener("resize", draw); return () => window.removeEventListener("resize", draw); }, [draw]);
+  const locate = (clientX: number, clientY: number) => {
+    const rect = canvasRef.current!.getBoundingClientRect();
+    return { col: Math.min(cols - 1, Math.max(0, Math.floor(((clientX - rect.left) / rect.width) * cols))), row: Math.min(rows - 1, Math.max(0, Math.floor(((clientY - rect.top) / rect.height) * rows))) };
+  };
+  const hoverValue = hover ? matrix[hover.col]?.[hover.row] : null;
+  const hoverUnit = hover ? population.units?.[hover.row] : null;
+  return (
+    <div className="heatmap-wrap">
+      <div className="heatmap-labels"><span>fixed target</span><span>generation means →</span></div>
+      <canvas ref={canvasRef} style={{ height }} onMouseMove={(event) => setHover(locate(event.clientX, event.clientY))} onMouseLeave={() => setHover(null)} onClick={(event) => { const point = locate(event.clientX, event.clientY); if (point.col > 0) onSelect(point.col - 1); }} aria-label={`Population activity heatmap with ${rows} units and ${cols - 1} generations`} role="img" />
+      <div className="heatmap-footer"><div className="color-key"><span>−{number(limit, 1)}</span><i /><span>0</span><b /><span>+{number(limit, 1)}</span></div><div className="heatmap-readout">{hover && hoverUnit ? `${hoverUnit.label} · ${hover.col === 0 ? "target" : `g${hover.col - 1}`} · ${number(hoverValue, 3)}` : `${population.geometryFrame} · hover to inspect`}</div></div>
+    </div>
+  );
+}
+
+function GeometryTraces({ trajectory, selected, onSelect }: { trajectory: TrajectoryPoint[]; selected: number; onSelect: (value: number) => void }) {
+  const traces = [
+    { key: "cosine" as const, label: "pattern cosine", target: 1, color: "#28b7a2" },
+    { key: "normRatio" as const, label: "norm / target norm", target: 1, color: "#f2a65a" },
+    { key: "normalizedDistance" as const, label: "normalized distance", target: 0, color: "#d97b93" },
+    { key: "projectionRatio" as const, label: "target projection", target: 1, color: "#8fa8ff" },
+  ];
+  return <div className="mini-trace-grid">{traces.map((trace) => <MiniTrace key={trace.key} trajectory={trajectory} field={trace.key} label={trace.label} target={trace.target} color={trace.color} selected={selected} onSelect={onSelect} />)}</div>;
+}
+
+function MiniTrace({ trajectory, field, label, target, color, selected, onSelect }: { trajectory: TrajectoryPoint[]; field: "cosine" | "normRatio" | "normalizedDistance" | "projectionRatio"; label: string; target: number; color: string; selected: number; onSelect: (value: number) => void }) {
+  const width = 340, height = 142, pad = 24;
+  const values = trajectory.map((row) => row[field]);
+  const valid = [...values.filter(finite), target];
+  let min = Math.min(...valid), max = Math.max(...valid);
+  const extra = Math.max((max - min) * .12, .05); min -= extra; max += extra;
+  const x = (index: number) => pad + index / Math.max(1, trajectory.length - 1) * (width - pad * 2);
+  const y = (value: number) => pad + (max - value) / (max - min) * (height - pad * 2);
+  const d = values.map((value, index) => finite(value) ? `${index ? "L" : "M"}${x(index)},${y(value)}` : "").join(" ");
+  return <div className="mini-trace"><div><span>{label}</span><strong>{number(values[selected], 2)}</strong></div><svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`${label} over generations`}><line x1={pad} x2={width - pad} y1={y(target)} y2={y(target)} className="target-line" /><path d={d} fill="none" stroke={color} strokeWidth="3" />{values.map((value, index) => finite(value) && <circle key={index} cx={x(index)} cy={y(value)} r={index === selected ? 5 : 2.2} fill={index === selected ? "#fff" : color} stroke={color} strokeWidth={index === selected ? 2 : 0} onClick={() => onSelect(index)} />)}</svg></div>;
+}
+
+function VectorPath({ trajectory, selected, onSelect }: { trajectory: TrajectoryPoint[]; selected: number; onSelect: (value: number) => void }) {
+  const width = 600, height = 350, left = 58, right = 22, top = 22, bottom = 52;
+  const xs = trajectory.map((row) => row.projectionRatio).filter(finite), ys = trajectory.map((row) => row.residualPc1).filter(finite);
+  let xMin = Math.min(...xs, 1), xMax = Math.max(...xs, 1), yMin = Math.min(...ys, 0), yMax = Math.max(...ys, 0);
+  const xp = Math.max((xMax - xMin) * .12, .08), yp = Math.max((yMax - yMin) * .12, .08); xMin -= xp; xMax += xp; yMin -= yp; yMax += yp;
+  const x = (value: number) => left + (value - xMin) / (xMax - xMin) * (width - left - right);
+  const y = (value: number) => top + (yMax - value) / (yMax - yMin) * (height - top - bottom);
+  const path = trajectory.map((row, index) => finite(row.projectionRatio) && finite(row.residualPc1) ? `${index ? "L" : "M"}${x(row.projectionRatio)},${y(row.residualPc1)}` : "").join(" ");
+  return <div className="path-wrap"><svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Population vector path toward target"><line x1={x(1)} x2={x(1)} y1={top} y2={height - bottom} className="target-line" /><line x1={left} x2={width - right} y1={y(0)} y2={y(0)} className="target-line" /><path d={path} className="path-line" />{trajectory.map((row, index) => finite(row.projectionRatio) && finite(row.residualPc1) && <circle key={index} cx={x(row.projectionRatio)} cy={y(row.residualPc1)} r={index === selected ? 7 : 4} fill={generationColor(index, trajectory.length)} className={index === selected ? "path-point selected" : "path-point"} onClick={() => onSelect(index)}><title>{`g${row.generation}: projection ${number(row.projectionRatio)}, residual ${number(row.residualPc1)}`}</title></circle>)}<text x={x(1)} y={y(0) + 5} textAnchor="middle" className="target-star">★</text><text x={(left + width - right) / 2} y={height - 10} textAnchor="middle" className="axis-title">target projection ratio → 1</text><text transform={`translate(16 ${(top + height - bottom) / 2}) rotate(-90)`} textAnchor="middle" className="axis-title">residual principal coordinate</text></svg><div className="path-caption"><span><i className="generation-gradient" /> early → late generation</span><span>★ fixed target at (1, 0)</span></div></div>;
+}
+
+function ProfileChart({ population, selected }: { population: PopulationData; selected: number }) {
+  const target = population.targetRawHz || [], generation = population.meanRawHz?.[selected] || [], units = population.units || [];
+  const width = 660, height = 350, left = 52, right = 16, top = 20, bottom = 58;
+  const valid = [...target, ...generation].filter(finite); let min = Math.min(...valid, 0), max = Math.max(...valid, 1); const pad = Math.max((max - min) * .1, 1); min -= pad; max += pad;
+  const x = (index: number) => left + index / Math.max(1, units.length - 1) * (width - left - right);
+  const y = (value: number) => top + (max - value) / (max - min) * (height - top - bottom);
+  const path = (series: number[]) => series.map((value, index) => `${index ? "L" : "M"}${x(index)},${y(value)}`).join(" ");
+  return <div className="profile-wrap"><svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Channel-by-channel population profile"><line x1={left} x2={width - right} y1={y(0)} y2={y(0)} className="target-line" /><path d={path(target)} className="profile-target" /><path d={path(generation)} className="profile-generation" />{generation.map((value, index) => <circle key={index} cx={x(index)} cy={y(value)} r="2.5" className="profile-point"><title>{`${units[index]?.label}: generation ${number(value)} Hz, target ${number(target[index])} Hz`}</title></circle>)}{units.filter((_, index) => index % Math.max(1, Math.ceil(units.length / 9)) === 0).map((unit) => <text key={unit.index} x={x(unit.index)} y={height - bottom + 22} transform={`rotate(45 ${x(unit.index)} ${height - bottom + 22})`} className="axis-label">{unit.label}</text>)}<text transform={`translate(15 ${(top + height - bottom) / 2}) rotate(-90)`} textAnchor="middle" className="axis-title">baseline-adjusted response (Hz)</text></svg><div className="chart-legend"><span><i className="line black" />fixed online target</span><span><i className="line teal" />selected generation mean</span></div></div>;
+}
