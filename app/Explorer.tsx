@@ -24,6 +24,7 @@ type ThreadSummary = {
   selectedShape: string | null;
   nGenerations: number | null;
   populationAvailable: boolean;
+  optimizerTargetCorrupted: boolean;
   detail: string;
 };
 
@@ -61,6 +62,12 @@ type TrajectoryPoint = {
 type PopulationData = {
   availability: "available" | "unavailable";
   reason?: string | null;
+  objectiveScoreSource?: string;
+  objectiveScoreScientificallyValid?: boolean;
+  optimizerTargetCorrupted?: boolean;
+  optimizationValid?: boolean;
+  populationActivitySource?: string;
+  populationActivityCorrectlyAligned?: boolean;
   geometryFrame?: string;
   geometryExact?: boolean;
   units?: { index: number; channel: number; unitSlot: number; label: string }[];
@@ -94,6 +101,8 @@ type GenerationStimulusSample = {
   roleRank: number;
   scoreRank: number;
   objectiveScore: number;
+  scoreSource?: string;
+  scoreScientificallyValid?: boolean;
   withinGenerationPercentile: number;
   imageId: string;
   asset: string;
@@ -104,6 +113,8 @@ type GenerationStimulusSample = {
 type GenerationStimulusGallery = {
   availability: "available" | "unavailable";
   reason?: string;
+  scoreSource?: string;
+  scoreScientificallyValid?: boolean;
   selectionPolicy?: { topK: number; description: string };
   generations?: {
     generation: number;
@@ -159,6 +170,9 @@ type ThreadDetail = {
     q2Eligible: boolean;
     q2ReachedDelta0p2: boolean | null;
     q2StandardizedDeficit: number | null;
+    optimizerTargetCorrupted?: boolean;
+    objectiveScoreScientificallyValid?: boolean | null;
+    populationActivityCorrectlyAligned?: boolean | null;
   };
   population: PopulationData;
   generationStimuli?: GenerationStimulusGallery;
@@ -241,6 +255,9 @@ function downstreamAnalysisNote(
   status: ThreadDetail["status"],
   nCompleteGenerations: number | null,
 ) {
+  if (status.optimizerTargetCorrupted) {
+    return "The recorded multithread online score is corrupted and is shown only as the historical signal seen by CMA-ES. Population panels use correctly thread-aligned recorded neural activity. This run remains excluded from Q1a/Q1b/Q2 inference.";
+  }
   if (status.q1bEligible) return null;
   if (status.q1bIneligibilityReason === "fewer_than_8_generations") {
     const count = nCompleteGenerations == null ? "Fewer than 8" : `Only ${nCompleteGenerations}`;
@@ -523,6 +540,12 @@ function DetailSkeleton() {
 }
 
 function ThreadCard({ row, selected, onSelect }: { row: ThreadSummary; selected: boolean; onSelect: (key: string) => void }) {
+  const callClass = row.optimizerTargetCorrupted
+    ? "warning"
+    : row.trajectorySuccess === true ? "success" : row.trajectorySuccess === false ? "neutral" : "missing";
+  const callTitle = row.optimizerTargetCorrupted
+    ? "descriptive population available; recorded online score is corrupted"
+    : row.trajectorySuccess === true ? "trajectory detected" : row.trajectorySuccess === false ? "not detected" : "not eligible for downstream analysis";
   return (
     <button className={selected ? "thread-card selected" : "thread-card"} onClick={() => onSelect(row.key)} aria-pressed={selected}>
       <TargetThumb src={row.targetAsset} name={row.targetName} />
@@ -531,7 +554,7 @@ function ThreadCard({ row, selected, onSelect }: { row: ThreadSummary; selected:
         <span className="thread-target">{row.targetName}</span>
         <span className="thread-meta">{row.objective} · {row.generator} · {row.nGenerations == null ? "— gen" : `${row.nGenerations} complete gen`}</span>
       </span>
-      <span className={`call-dot ${row.trajectorySuccess === true ? "success" : row.trajectorySuccess === false ? "neutral" : "missing"}`} title={row.trajectorySuccess === true ? "trajectory detected" : row.trajectorySuccess === false ? "not detected" : "not eligible for downstream analysis"} />
+      <span className={`call-dot ${callClass}`} title={callTitle} />
     </button>
   );
 }
@@ -548,6 +571,7 @@ function ThreadView({ detail, selectedGeneration, setSelectedGeneration }: { det
   const [stimulusChoice, setStimulusChoice] = useState<StimulusChoice>("top");
   const [topRank, setTopRank] = useState(1);
   const trajectory = population.trajectory || [];
+  const corruptOnlineScore = Boolean(status.optimizerTargetCorrupted || population.optimizerTargetCorrupted);
   const selected = trajectory[selectedGeneration] || null;
   const nCompleteGenerations = meta.nCompleteGenerations ?? (trajectory.length || null);
   const analysisNote = downstreamAnalysisNote(status, nCompleteGenerations);
@@ -578,15 +602,19 @@ function ThreadView({ detail, selectedGeneration, setSelectedGeneration }: { det
           {analysisNote && <p className="analysis-note">{analysisNote}</p>}
         </div>
         <div className="status-cluster">
-          <StatusBadge success={status.trajectorySuccess} label={status.trajectorySuccess ? "trajectory detected" : status.q1bEligible ? "not detected" : "not eligible"} />
-          <span className="method-badge">{status.selectedShape || "no fit"}</span>
+          {corruptOnlineScore ? (
+            <span className="status-badge warning"><i />online score corrupted</span>
+          ) : (
+            <StatusBadge success={status.trajectorySuccess} label={status.trajectorySuccess ? "trajectory detected" : status.q1bEligible ? "not detected" : "not eligible"} />
+          )}
+          <span className="method-badge">{corruptOnlineScore ? "descriptive only" : status.selectedShape || "no fit"}</span>
         </div>
       </div>
 
       {population.availability === "available" && selected && (
         <div className="generation-control">
           <button onClick={() => setSelectedGeneration(Math.max(0, selectedGeneration - 1))} disabled={selectedGeneration === 0} aria-label="Previous generation">←</button>
-          <div><span>Selected generation</span><strong>g{selected.generation}</strong><em>{selected.nImages} images · score {number(selected.scoreMean, 3)}</em></div>
+          <div><span>Selected generation</span><strong>g{selected.generation}</strong><em>{selected.nImages} images · {corruptOnlineScore ? "online signal" : "score"} {number(selected.scoreMean, 3)}{corruptOnlineScore ? " (corrupted)" : ""}</em></div>
           <input aria-label="Selected generation" type="range" min={0} max={trajectory.length - 1} value={selectedGeneration} onChange={(event) => setSelectedGeneration(Number(event.target.value))} />
           <button onClick={() => setSelectedGeneration(Math.min(trajectory.length - 1, selectedGeneration + 1))} disabled={selectedGeneration === trajectory.length - 1} aria-label="Next generation">→</button>
         </div>
@@ -621,7 +649,7 @@ function ThreadView({ detail, selectedGeneration, setSelectedGeneration }: { det
         </div>
 
         <section className="card objective-card">
-          <div className="card-title-row"><div><div className="panel-letter">A</div><div><h3>Optimized objective</h3><p>Exact per-image score, summarized by generation</p></div></div><StatusBadge success={status.trajectorySuccess} label={`composite q ${number(status.trajectoryQ, 3)}`} compact /></div>
+          <div className="card-title-row"><div><div className="panel-letter">A</div><div><h3>{corruptOnlineScore ? "Recorded online optimizer signal" : "Optimized objective"}</h3><p>{corruptOnlineScore ? "What CMA-ES saw; corrupted and not a valid per-thread scientific objective" : "Exact per-image score, summarized by generation"}</p></div></div>{corruptOnlineScore ? <span className="status-badge warning compact"><i />not scientifically valid</span> : <StatusBadge success={status.trajectorySuccess} label={`composite q ${number(status.trajectoryQ, 3)}`} compact />}</div>
           {population.availability === "available" ? (
             <ObjectiveChart population={population} selected={selectedGeneration} onSelect={setSelectedGeneration} />
           ) : <Unavailable reason={population.reason} />}
@@ -635,11 +663,11 @@ function ThreadView({ detail, selectedGeneration, setSelectedGeneration }: { det
       {population.availability === "available" ? (
         <>
           <section className="card profile-card">
-            <PanelTitle letter="E" title={`Activity profile at g${selected?.generation ?? 0}`} subtitle={`Generation mean compared with target · ${ACTIVITY_SCALE_INFO[activityScale].title}`} />
+            <PanelTitle letter="E" title={`Activity profile at g${selected?.generation ?? 0}`} subtitle={`${corruptOnlineScore ? "Correctly thread-aligned recorded neural activity" : "Generation mean compared with target"} · ${ACTIVITY_SCALE_INFO[activityScale].title}`} />
             <ProfileChart population={population} scale={activityScale} selected={selectedGeneration} />
           </section>
           <section className="card heatmap-card">
-            <PanelTitle letter="B" title="Population activity" subtitle={`Fixed target and generation means · ${ACTIVITY_SCALE_INFO[activityScale].title}`} />
+            <PanelTitle letter="B" title="Population activity" subtitle={`${corruptOnlineScore ? "Correctly thread-aligned recorded neural activity" : "Fixed target and generation means"} · ${ACTIVITY_SCALE_INFO[activityScale].title}`} />
             <PopulationHeatmap population={population} scale={activityScale} selected={selectedGeneration} onSelect={setSelectedGeneration} />
           </section>
           <div className="two-column-grid lower-grid">
@@ -660,9 +688,10 @@ function ThreadView({ detail, selectedGeneration, setSelectedGeneration }: { det
       <section className="card provenance-card">
         <div><p className="eyebrow">Interpretation guardrails</p><h3>What these panels mean</h3></div>
         <div className="guardrail-grid">
-          <p><strong>Black points</strong> are means of exact per-image objective scores. They are not the score of the generation-mean vector.</p>
+          <p><strong>Black points</strong> {corruptOnlineScore ? "are means of the recorded online optimizer signal. That multithread signal is corrupted and is not a valid per-thread scientific objective." : "are means of exact per-image objective scores. They are not the score of the generation-mean vector."}</p>
+          {corruptOnlineScore && <p><strong>Generated images</strong> are ranked by that same recorded online signal, documenting the images CMA-ES treated as best, typical, and lowest—not their true scientific rank.</p>}
           <p><strong>Fixed target</strong> is the population vector used online. Empirical repeat trials, when present, are a separate reference.</p>
-          <p><strong>Population frame</strong> is {population.geometryExact ? "the exact objective operand frame" : "a descriptive common frame"}; baseline handling is {humanBaseline(meta.baselineMode)}.</p>
+          <p><strong>Population frame</strong> uses {corruptOnlineScore ? "actual recorded neural activity correctly aligned to this thread" : population.geometryExact ? "the exact objective operand frame" : "a descriptive common frame"}; baseline handling is {humanBaseline(meta.baselineMode)}.</p>
         </div>
         {meta.comments && <details><summary>Operator notes from the experimental registry</summary><p>{meta.comments}</p></details>}
       </section>
@@ -681,6 +710,7 @@ function GeneratedStimulusCard({ gallery, generation, sample, choice, topRank, o
 }) {
   const [failedAsset, setFailedAsset] = useState<string | null>(null);
   const available = gallery?.availability === "available" && generation && sample;
+  const corruptOnlineScore = gallery?.scoreScientificallyValid === false || sample?.scoreScientificallyValid === false;
   const roleLabel = choice === "top" ? `Best ${topRank} of 3` : choice === "median" ? "Typical" : "Lowest";
   return (
     <section className="card stimulus-card">
@@ -713,12 +743,13 @@ function GeneratedStimulusCard({ gallery, generation, sample, choice, topRank, o
       {available ? (
         <div className="stimulus-caption">
           <div><strong>{roleLabel}</strong><span>rank {sample.scoreRank} of {generation.nImages}</span></div>
-          <div><span>Exact score</span><strong>{number(sample.objectiveScore, 3)}</strong></div>
+          <div><span>{corruptOnlineScore ? "Online signal (corrupted)" : "Exact score"}</span><strong>{number(sample.objectiveScore, 3)}</strong></div>
           <div><span>Within generation</span><strong>{number(sample.withinGenerationPercentile, 0)}th percentile</strong></div>
         </div>
       ) : (
         <p className="stimulus-unavailable">{gallery?.reason || "Representative generated images have not been attached to this data bundle."}</p>
       )}
+      {corruptOnlineScore && <p className="stimulus-warning">Image rank records what CMA-ES saw online; it is not a valid scientific per-thread ranking.</p>}
     </section>
   );
 }
@@ -786,7 +817,9 @@ function ObjectiveChart({ population, selected, onSelect }: { population: Popula
   const xTickCount = Math.max(3, Math.min(6, Math.floor(width / 130)));
   const xTicks = [...new Set(Array.from({ length: xTickCount },
     (_, index) => Math.round((index / (xTickCount - 1)) * maxGen)))];
-  const yLabel = mode === "native" ? "exact objective score" : mode === "standardized" ? "improvement / early image SD" : "fraction from g0 to ideal";
+  const yLabel = mode === "native"
+    ? population.optimizerTargetCorrupted ? "recorded online signal (corrupted)" : "exact objective score"
+    : mode === "standardized" ? "improvement / early image SD" : "fraction from g0 to ideal";
   return (
     <div className="chart-wrap" ref={wrapRef}>
       <div className="segmented-control" aria-label="Objective scale">{modes.map((item) => <button key={item.id} disabled={!item.available} className={mode === item.id ? "active" : ""} onClick={() => item.available && setMode(item.id)}>{item.label}</button>)}</div>

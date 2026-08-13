@@ -76,6 +76,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focu
 .thread-meta { color: #51646e; font-size: 9px; }
 .call-dot { width: 7px; height: 7px; border-radius: 50%; background: #53636c; }
 .call-dot.success { background: var(--teal); box-shadow: 0 0 7px rgba(53,194,170,.55); }
+.call-dot.warning { width: 9px; height: 9px; background: transparent; border: 1.5px dashed #e7a84b; box-shadow: 0 0 7px rgba(231,168,75,.25); }
 .call-dot.missing { background: transparent; border: 1px dashed #53636c; }
 .empty-list { text-align: center; padding: 35px 16px; color: var(--faint); font-size: 12px; }
 
@@ -91,6 +92,8 @@ button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focu
 .status-badge i { width: 6px; height: 6px; border-radius: 50%; background: #72818a; }
 .status-badge.success { color: #a5ebdf; border-color: #27675e; background: rgba(42,151,134,.11); }
 .status-badge.success i { background: var(--teal); box-shadow: 0 0 7px rgba(53,194,170,.5); }
+.status-badge.warning { color: #f0c77e; border-color: #84612d; background: rgba(207,139,38,.11); }
+.status-badge.warning i { background: #e7a84b; box-shadow: 0 0 7px rgba(231,168,75,.45); }
 .status-badge.missing { border-style: dashed; }
 .status-badge.compact { font-size: 9px; padding: 5px 8px; }
 .method-badge { color: #aebaf0; background: rgba(143,168,255,.1); border: 1px solid rgba(143,168,255,.28); border-radius: 999px; padding: 7px 10px; font-size: 10px; }
@@ -127,6 +130,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focu
 .stimulus-caption > div:first-child { padding-bottom: 8px; border-bottom: 1px solid var(--line); }
 .stimulus-caption > div:first-child strong { color: var(--teal); font-size: 11px; }
 .stimulus-unavailable { margin: 10px 1px 0; color: var(--faint); font-size: 8px; line-height: 1.45; }
+.stimulus-warning { margin: 10px 0 0; padding: 8px 9px; border-left: 2px solid #84612d; background: rgba(207,139,38,.07); color: #cbb58e; font-size: 8.5px; line-height: 1.45; }
 .objective-card, .heatmap-card, .geometry-card, .path-card, .profile-card { padding: 15px 17px 13px; min-width: 0; }
 .card-title-row { display: flex; justify-content: space-between; gap: 12px; align-items: start; }
 .card-title-row > div:first-child { display: flex; gap: 10px; }

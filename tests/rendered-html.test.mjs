@@ -55,8 +55,35 @@ test("validated population records expose all three activity scales", async () =
       }
     });
   }
-  assert.equal(available, 272);
+  assert.equal(available, 303);
   assert.ok(unscalable > 0 && unscalable / unitScales < 0.01);
+});
+
+test("multithread runs separate corrupted online scores from aligned neural activity", async () => {
+  const publicRoot = new URL("../public/", import.meta.url);
+  const index = JSON.parse(await readFile(new URL("data/index.json", publicRoot), "utf8"));
+  const multithread = index.threads.filter((row) => row.optimizerTargetCorrupted);
+  assert.equal(multithread.length, 31);
+
+  for (const row of multithread) {
+    assert.equal(row.populationAvailable, true, row.key);
+    assert.equal(row.generationStimuliAvailable, true, row.key);
+    assert.equal(row.trajectorySuccess, null, row.key);
+    const detail = JSON.parse(await readFile(new URL(row.detail.slice(1), publicRoot), "utf8"));
+    assert.equal(detail.status.optimizerTargetCorrupted, true, row.key);
+    assert.equal(detail.status.objectiveScoreScientificallyValid, false, row.key);
+    assert.equal(detail.status.populationActivityCorrectlyAligned, true, row.key);
+    assert.equal(detail.population.objectiveScoreSource, "online_recorded_optimizer_signal_corrupted", row.key);
+    assert.equal(detail.population.optimizationValid, false, row.key);
+    assert.equal(detail.population.populationActivitySource, "correctly_aligned_recorded_neural_activity", row.key);
+    assert.equal(detail.population.trajectory.length, row.nGenerations, row.key);
+    assert.equal(detail.population.trajectory.every((point) => point.fittedScore == null && point.linearScore == null), true, row.key);
+    assert.equal(detail.generationStimuli.scoreScientificallyValid, false, row.key);
+    assert.equal(detail.generationStimuli.generations.length, row.nGenerations, row.key);
+    const sample = detail.generationStimuli.generations[0].samples[0];
+    assert.equal(sample.scoreScientificallyValid, false, row.key);
+    await readFile(new URL(sample.asset.slice(1), publicRoot));
+  }
 });
 
 test("short validated sessions retain descriptive counts and explicit eligibility reasons", async () => {
