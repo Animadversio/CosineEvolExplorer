@@ -256,7 +256,7 @@ function downstreamAnalysisNote(
   nCompleteGenerations: number | null,
 ) {
   if (status.optimizerTargetCorrupted) {
-    return "The recorded multithread online score is corrupted and is shown only as the historical signal seen by CMA-ES. Population panels use correctly thread-aligned recorded neural activity. This run remains excluded from Q1a/Q1b/Q2 inference.";
+    return "Recorded multithread online score is corrupted. It is shown only as the historical signal seen by CMA-ES. Population panels use correctly thread-aligned recorded neural activity. This run remains excluded from Q1a/Q1b/Q2 inference.";
   }
   if (status.q1bEligible) return null;
   if (status.q1bIneligibilityReason === "fewer_than_8_generations") {
@@ -599,7 +599,12 @@ function ThreadView({ detail, selectedGeneration, setSelectedGeneration }: { det
           <div className="breadcrumb"><span>{meta.animal}</span><span>/</span><span>{meta.date}</span><span>/</span><span>thread {String(meta.threadId0).padStart(3, "0")}</span></div>
           <h2>{meta.ephysFN}</h2>
           <p>{meta.objective} · {meta.nObjectiveUnits ?? "—"} objective-relevant units · {nCompleteGenerations ?? "—"} complete generations</p>
-          {analysisNote && <p className="analysis-note">{analysisNote}</p>}
+          {analysisNote && (
+            <p className={corruptOnlineScore ? "analysis-note critical-warning" : "analysis-note"}>
+              {corruptOnlineScore && <strong>WARNING</strong>}
+              <span>{analysisNote}</span>
+            </p>
+          )}
         </div>
         <div className="status-cluster">
           {corruptOnlineScore ? (

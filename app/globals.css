@@ -87,13 +87,15 @@ button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focu
 .thread-heading h2 { margin: 5px 0 2px; font-size: clamp(22px, 2vw, 31px); letter-spacing: -.035em; font-weight: 640; }
 .thread-heading p { margin: 0; color: var(--muted); font-size: 12px; }
 .thread-heading p.analysis-note { margin-top: 7px; max-width: 780px; padding-left: 9px; border-left: 2px solid #6c7b83; color: #91a1a8; font-size: 10px; line-height: 1.45; }
+.thread-heading p.analysis-note.critical-warning { display: flex; align-items: flex-start; gap: 9px; max-width: 880px; padding: 9px 11px; border: 1px solid rgba(255, 92, 92, .55); border-left: 4px solid #ff5c5c; border-radius: 7px; background: rgba(204, 47, 47, .13); color: #f3c0c0; font-size: 10.5px; box-shadow: 0 0 18px rgba(204, 47, 47, .08); }
+.thread-heading p.analysis-note.critical-warning strong { flex: 0 0 auto; color: #ff7777; font-size: 10px; line-height: 1.5; letter-spacing: .12em; }
 .status-cluster { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: end; }
 .status-badge { display: inline-flex; align-items: center; gap: 7px; border: 1px solid #304550; background: #101c23; border-radius: 999px; color: #98a8af; font-size: 10px; padding: 7px 10px; white-space: nowrap; }
 .status-badge i { width: 6px; height: 6px; border-radius: 50%; background: #72818a; }
 .status-badge.success { color: #a5ebdf; border-color: #27675e; background: rgba(42,151,134,.11); }
 .status-badge.success i { background: var(--teal); box-shadow: 0 0 7px rgba(53,194,170,.5); }
-.status-badge.warning { color: #f0c77e; border-color: #84612d; background: rgba(207,139,38,.11); }
-.status-badge.warning i { background: #e7a84b; box-shadow: 0 0 7px rgba(231,168,75,.45); }
+.status-badge.warning { color: #ffaaaa; border-color: #8f3f45; background: rgba(204,47,47,.13); }
+.status-badge.warning i { background: #ff5c5c; box-shadow: 0 0 7px rgba(255,92,92,.52); }
 .status-badge.missing { border-style: dashed; }
 .status-badge.compact { font-size: 9px; padding: 5px 8px; }
 .method-badge { color: #aebaf0; background: rgba(143,168,255,.1); border: 1px solid rgba(143,168,255,.28); border-radius: 999px; padding: 7px 10px; font-size: 10px; }
