@@ -207,6 +207,22 @@ function finite(value: number | null | undefined): value is number {
   return value != null && Number.isFinite(value);
 }
 
+/** Live content-box width of an element, so a chart can re-lay-out instead of being scaled. */
+function useElementWidth<T extends HTMLElement>() {
+  const ref = useRef<T>(null);
+  const [width, setWidth] = useState(0);
+  useEffect(() => {
+    const node = ref.current;
+    if (!node) return;
+    setWidth(node.getBoundingClientRect().width);
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(([entry]) => setWidth(entry.contentRect.width));
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
+  return [ref, width] as const;
+}
+
 function number(value: number | null | undefined, digits = 2) {
   if (!finite(value)) return "—";
   const magnitude = Math.abs(value);
@@ -746,7 +762,13 @@ function ObjectiveChart({ population, selected, onSelect }: { population: Popula
     { id: "standardized" as const, label: "From g0 (early image SD)", available: finite(population.scoreScaleEarlyImageSd) },
     { id: "ceiling" as const, label: "Fraction to ideal", available: trajectory.some((row) => finite(row.fractionToIdealCeiling)) },
   ];
-  const width = 820, height = 310, left = 64, right = 18, top = 22, bottom = 52;
+  // The chart re-lays-out at 1:1 CSS pixels rather than being uniformly scaled: narrowing the
+  // panel compresses the generation axis while label and marker sizes stay legible. Height is
+  // damped against width so the aspect ratio changes instead of the whole figure shrinking.
+  const [wrapRef, measuredWidth] = useElementWidth<HTMLDivElement>();
+  const width = Math.max(340, Math.round(measuredWidth) || 820);
+  const height = Math.round(Math.min(330, Math.max(248, width * 0.38)));
+  const left = 60, right = 16, top = 20, bottom = 50;
   const values = trajectory.map((point) => mode === "native" ? point.scoreMean : mode === "standardized" ? point.improvementEarlyImageSd : point.fractionToIdealCeiling);
   const sems = trajectory.map((point) => mode === "native" ? point.scoreSem : mode === "standardized" && finite(point.scoreSem) && finite(population.scoreScaleEarlyImageSd) ? point.scoreSem / population.scoreScaleEarlyImageSd : null);
   const fitted = trajectory.map((point) => mode === "native" ? point.fittedScore : mode === "standardized" && finite(point.fittedScore) && finite(population.scoreScaleEarlyImageSd) ? (point.fittedScore - trajectory[0].scoreMean) / population.scoreScaleEarlyImageSd : mode === "ceiling" ? null : null);
@@ -761,9 +783,12 @@ function ObjectiveChart({ population, selected, onSelect }: { population: Popula
   const y = (value: number) => top + ((yMax - value) / (yMax - yMin)) * (height - top - bottom);
   const path = (series: (number | null)[]) => series.map((value, index) => finite(value) ? `${index ? "L" : "M"}${x(trajectory[index].generation).toFixed(1)},${y(value).toFixed(1)}` : "").join(" ");
   const yTicks = Array.from({ length: 5 }, (_, index) => yMin + (index / 4) * (yMax - yMin));
+  const xTickCount = Math.max(3, Math.min(6, Math.floor(width / 130)));
+  const xTicks = [...new Set(Array.from({ length: xTickCount },
+    (_, index) => Math.round((index / (xTickCount - 1)) * maxGen)))];
   const yLabel = mode === "native" ? "exact objective score" : mode === "standardized" ? "improvement / early image SD" : "fraction from g0 to ideal";
   return (
-    <div className="chart-wrap">
+    <div className="chart-wrap" ref={wrapRef}>
       <div className="segmented-control" aria-label="Objective scale">{modes.map((item) => <button key={item.id} disabled={!item.available} className={mode === item.id ? "active" : ""} onClick={() => item.available && setMode(item.id)}>{item.label}</button>)}</div>
       <svg className="objective-chart" viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`Objective trajectory in ${yLabel}`}>
         {yTicks.map((tick) => <g key={tick}><line x1={left} x2={width - right} y1={y(tick)} y2={y(tick)} className="gridline" /><text x={left - 10} y={y(tick) + 4} textAnchor="end" className="axis-label">{number(tick, 2)}</text></g>)}
@@ -775,9 +800,9 @@ function ObjectiveChart({ population, selected, onSelect }: { population: Popula
           {finite(sems[index]) && <line x1={x(point.generation)} x2={x(point.generation)} y1={y(values[index]! - sems[index]!)} y2={y(values[index]! + sems[index]!)} className="errorbar" />}
           <circle cx={x(point.generation)} cy={y(values[index]!)} r={index === selected ? 6.5 : 3.7} className={index === selected ? "raw-point selected" : "raw-point"} />
         </g>)}
-        {Array.from({ length: 6 }, (_, index) => Math.round((index / 5) * maxGen)).map((tick) => <text key={tick} x={x(tick)} y={height - bottom + 24} textAnchor="middle" className="axis-label">{tick}</text>)}
+        {xTicks.map((tick) => <text key={tick} x={x(tick)} y={height - bottom + 22} textAnchor="middle" className="axis-label">{tick}</text>)}
         <text x={(left + width - right) / 2} y={height - 8} textAnchor="middle" className="axis-title">CMA-ES generation</text>
-        <text transform={`translate(16 ${(top + height - bottom) / 2}) rotate(-90)`} textAnchor="middle" className="axis-title">{yLabel}</text>
+        <text transform={`translate(15 ${(top + height - bottom) / 2}) rotate(-90)`} textAnchor="middle" className="axis-title">{yLabel}</text>
       </svg>
       <div className="chart-legend"><span><i className="dot black" />generation mean ± SEM</span>{fitted.some(finite) && <span><i className="line indigo" />selected saturation fit</span>}{linear.some(finite) && <span><i className="line amber" />canonical linear fit</span>}</div>
     </div>

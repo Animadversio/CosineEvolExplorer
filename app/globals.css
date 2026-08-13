@@ -46,7 +46,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focu
 .intro-strip > p { max-width: 630px; margin: 0; color: var(--muted); font-size: 13px; line-height: 1.6; }
 .eyebrow { margin: 0; color: var(--teal); font-size: 10px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase; }
 
-.workspace { max-width: 1700px; margin: 0 auto; padding: 0 28px 50px; display: grid; grid-template-columns: 332px minmax(0, 1fr); gap: 18px; align-items: start; }
+.workspace { max-width: 1700px; margin: 0 auto; padding: 0 28px 50px; display: grid; grid-template-columns: 304px minmax(0, 1fr); gap: 18px; align-items: start; }
 .browser { background: rgba(11, 23, 31, .78); border: 1px solid var(--line); border-radius: 14px; position: sticky; top: 89px; max-height: calc(100vh - 108px); display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 18px 60px rgba(0,0,0,.16); }
 .browser-head { padding: 17px 17px 12px; display: flex; align-items: end; justify-content: space-between; }
 .browser-head h3 { margin: 4px 0 0; font-size: 14px; font-weight: 600; }
@@ -96,7 +96,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focu
 .method-badge { color: #aebaf0; background: rgba(143,168,255,.1); border: 1px solid rgba(143,168,255,.28); border-radius: 999px; padding: 7px 10px; font-size: 10px; }
 
 .card { background: linear-gradient(155deg, rgba(14, 29, 38, .97), rgba(9, 20, 28, .97)); border: 1px solid var(--line); border-radius: 14px; box-shadow: 0 16px 50px rgba(0,0,0,.13); }
-.hero-grid { display: grid; grid-template-columns: 524px minmax(440px, 1fr); gap: 14px; align-items: start; }
+.hero-grid { display: grid; grid-template-columns: 524px minmax(400px, 1fr); gap: 14px; align-items: start; }
 .stimulus-pair { display: grid; grid-template-columns: repeat(2, 255px); gap: 14px; align-items: start; }
 .target-card, .stimulus-card { padding: 14px; }
 .card-label { color: var(--faint); text-transform: uppercase; font-size: 9px; letter-spacing: .12em; margin-bottom: 9px; }
@@ -136,18 +136,19 @@ button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focu
 .panel-title p, .card-title-row p { margin: 3px 0 0; color: var(--faint); font-size: 9px; }
 
 .chart-wrap { margin-top: 3px; }
-.segmented-control { display: inline-flex; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; margin: 4px 0 3px 40px; }
+/* 60px matches the objective chart's plot-area inset, which is now in CSS pixels. */
+.segmented-control { display: inline-flex; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; margin: 4px 0 3px 60px; }
 .segmented-control button { border: 0; border-right: 1px solid var(--line); background: #09151c; color: var(--faint); padding: 5px 9px; font-size: 9px; cursor: pointer; }
 .segmented-control button:last-child { border-right: 0; }
 .segmented-control button.active { color: #b3eee4; background: rgba(53,194,170,.12); }
 .segmented-control button:disabled { opacity: .28; cursor: not-allowed; }
-.objective-chart { width: 100%; display: block; overflow: visible; }
+.objective-chart { width: 100%; height: auto; display: block; overflow: visible; }
 .gridline { stroke: #1b2d36; stroke-width: 1; }
 .axis { stroke: #4c626c; stroke-width: 1.1; }
 .axis-label { fill: #71848e; font-size: 10px; font-family: var(--font-geist-mono), monospace; }
 .axis-title { fill: #91a3aa; font-size: 10px; }
-.fit-line { fill: none; stroke: var(--indigo); stroke-width: 3.2; }
-.linear-line { fill: none; stroke: var(--amber); stroke-width: 2.2; stroke-dasharray: 7 5; }
+.fit-line { fill: none; stroke: var(--indigo); stroke-width: 2.4; }
+.linear-line { fill: none; stroke: var(--amber); stroke-width: 1.8; stroke-dasharray: 6 4; }
 .errorbar { stroke: #73848b; stroke-width: 1.3; opacity: .75; }
 .raw-point { fill: #0b1116; stroke: #d7e0e3; stroke-width: 1.3; cursor: pointer; }
 .raw-point.selected { fill: var(--teal); stroke: white; stroke-width: 2; }
@@ -236,14 +237,16 @@ button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focu
 .loading-screen, .fatal { min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; color: var(--muted); font-size: 12px; }
 footer { max-width: 1700px; margin: 0 auto; padding: 25px 28px 40px; display: flex; justify-content: space-between; border-top: 1px solid var(--line); color: var(--faint); font-size: 9px; }
 
-@media (max-width: 1500px) {
+/* 524px stimulus pair + 14px gap + 400px panel A = 938px, plus the 304px browser,
+   the 18px workspace gap and 56px of padding: the row still fits above 1316px. */
+@media (max-width: 1320px) {
   .hero-grid { grid-template-columns: minmax(0, 1fr); }
   .stimulus-pair { justify-content: center; }
 }
 
 @media (max-width: 1250px) {
   .topbar-stats span:nth-child(2), .topbar-stats span:nth-child(3) { display: none; }
-  .workspace { grid-template-columns: 300px minmax(0, 1fr); }
+  .workspace { grid-template-columns: 282px minmax(0, 1fr); }
   .two-column-grid, .lower-grid { grid-template-columns: 1fr; }
   .geometry-card { min-height: 340px; }
 }
