@@ -22,7 +22,7 @@ type ThreadSummary = {
   trajectorySuccess: boolean | null;
   trajectoryQ: number | null;
   selectedShape: string | null;
-  nGenerations: number;
+  nGenerations: number | null;
   populationAvailable: boolean;
   detail: string;
 };
@@ -139,6 +139,7 @@ type ThreadDetail = {
     imageSizeDegrees: number | null;
     imagePositionDegrees: [number, number];
     nObjectiveUnits: number | null;
+    nCompleteGenerations: number | null;
     comments: string | null;
   };
   status: {
@@ -218,6 +219,23 @@ function humanBaseline(value: string | null | undefined) {
   if (value === "trialwise") return "trial-wise subtraction";
   if (value === "none") return "no subtraction";
   return value || "unresolved";
+}
+
+function downstreamAnalysisNote(
+  status: ThreadDetail["status"],
+  nCompleteGenerations: number | null,
+) {
+  if (status.q1bEligible) return null;
+  if (status.q1bIneligibilityReason === "fewer_than_8_generations") {
+    const count = nCompleteGenerations == null ? "Fewer than 8" : `Only ${nCompleteGenerations}`;
+    return `${count} complete generations were recorded; at least 8 are required. This session is shown descriptively but is not included in downstream Q1a/Q1b/Q2 inference.`;
+  }
+  const rawReason = status.exclusionReason || status.q1bIneligibilityReason;
+  if (rawReason) {
+    const reason = rawReason.replaceAll("_", " ");
+    return `Not included in downstream inference: ${reason}.`;
+  }
+  return "Descriptive metadata are retained, but this session is not eligible for downstream inference.";
 }
 
 function generationColor(index: number, total: number) {
@@ -495,9 +513,9 @@ function ThreadCard({ row, selected, onSelect }: { row: ThreadSummary; selected:
       <span className="thread-card-copy">
         <span className="thread-id">{row.ephysFN}{row.threadId0 ? ` · T${row.threadId0}` : ""}</span>
         <span className="thread-target">{row.targetName}</span>
-        <span className="thread-meta">{row.objective} · {row.generator} · {row.nGenerations || "—"} gen</span>
+        <span className="thread-meta">{row.objective} · {row.generator} · {row.nGenerations == null ? "— gen" : `${row.nGenerations} complete gen`}</span>
       </span>
-      <span className={`call-dot ${row.trajectorySuccess === true ? "success" : row.trajectorySuccess === false ? "neutral" : "missing"}`} title={row.trajectorySuccess === true ? "trajectory detected" : row.trajectorySuccess === false ? "not detected" : "unavailable"} />
+      <span className={`call-dot ${row.trajectorySuccess === true ? "success" : row.trajectorySuccess === false ? "neutral" : "missing"}`} title={row.trajectorySuccess === true ? "trajectory detected" : row.trajectorySuccess === false ? "not detected" : "not eligible for downstream analysis"} />
     </button>
   );
 }
@@ -515,6 +533,8 @@ function ThreadView({ detail, selectedGeneration, setSelectedGeneration }: { det
   const [topRank, setTopRank] = useState(1);
   const trajectory = population.trajectory || [];
   const selected = trajectory[selectedGeneration] || null;
+  const nCompleteGenerations = meta.nCompleteGenerations ?? (trajectory.length || null);
+  const analysisNote = downstreamAnalysisNote(status, nCompleteGenerations);
   const stimulusGeneration = detail.generationStimuli?.generations?.find(
     (row) => row.generation === selected?.generation,
   );
@@ -538,7 +558,8 @@ function ThreadView({ detail, selectedGeneration, setSelectedGeneration }: { det
         <div>
           <div className="breadcrumb"><span>{meta.animal}</span><span>/</span><span>{meta.date}</span><span>/</span><span>thread {String(meta.threadId0).padStart(3, "0")}</span></div>
           <h2>{meta.ephysFN}</h2>
-          <p>{meta.objective} · {meta.nObjectiveUnits ?? "—"} objective-relevant units · {trajectory.length || "—"} generations</p>
+          <p>{meta.objective} · {meta.nObjectiveUnits ?? "—"} objective-relevant units · {nCompleteGenerations ?? "—"} complete generations</p>
+          {analysisNote && <p className="analysis-note">{analysisNote}</p>}
         </div>
         <div className="status-cluster">
           <StatusBadge success={status.trajectorySuccess} label={status.trajectorySuccess ? "trajectory detected" : status.q1bEligible ? "not detected" : "not eligible"} />

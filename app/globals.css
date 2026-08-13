@@ -85,6 +85,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focu
 .breadcrumb span:nth-child(even) { color: #314650; }
 .thread-heading h2 { margin: 5px 0 2px; font-size: clamp(22px, 2vw, 31px); letter-spacing: -.035em; font-weight: 640; }
 .thread-heading p { margin: 0; color: var(--muted); font-size: 12px; }
+.thread-heading p.analysis-note { margin-top: 7px; max-width: 780px; padding-left: 9px; border-left: 2px solid #6c7b83; color: #91a1a8; font-size: 10px; line-height: 1.45; }
 .status-cluster { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: end; }
 .status-badge { display: inline-flex; align-items: center; gap: 7px; border: 1px solid #304550; background: #101c23; border-radius: 999px; color: #98a8af; font-size: 10px; padding: 7px 10px; white-space: nowrap; }
 .status-badge i { width: 6px; height: 6px; border-radius: 50%; background: #72818a; }

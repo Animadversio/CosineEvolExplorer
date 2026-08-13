@@ -58,3 +58,26 @@ test("validated population records expose all three activity scales", async () =
   assert.equal(available, 272);
   assert.ok(unscalable > 0 && unscalable / unitScales < 0.01);
 });
+
+test("short validated sessions retain descriptive counts and explicit eligibility reasons", async () => {
+  const publicRoot = new URL("../public/", import.meta.url);
+  const index = JSON.parse(await readFile(new URL("data/index.json", publicRoot), "utf8"));
+  assert.ok(index.threads.every((row) => Number.isInteger(row.nGenerations) && row.nGenerations > 0));
+  const expected = new Map([
+    ["Diablito-15052024-005#thread000", { units: 51, generations: 2 }],
+    ["Diablito-20052024-004#thread000", { units: 48, generations: 5 }],
+  ]);
+
+  for (const [key, counts] of expected) {
+    const row = index.threads.find((item) => item.key === key);
+    assert.ok(row, key);
+    assert.equal(row.nGenerations, counts.generations, key);
+    assert.equal(row.populationAvailable, false, key);
+    assert.equal(row.q1bEligible, false, key);
+    const detail = JSON.parse(await readFile(new URL(row.detail.slice(1), publicRoot), "utf8"));
+    assert.equal(detail.metadata.nObjectiveUnits, counts.units, key);
+    assert.equal(detail.metadata.nCompleteGenerations, counts.generations, key);
+    assert.equal(detail.status.q1bIneligibilityReason, "fewer_than_8_generations", key);
+    assert.equal(detail.population.availability, "unavailable", key);
+  }
+});
