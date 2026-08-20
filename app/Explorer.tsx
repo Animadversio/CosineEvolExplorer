@@ -184,6 +184,64 @@ const GENERATION_COLORS = ["#440154", "#414487", "#2a788e", "#22a884", "#7ad151"
 const PUBLIC_BASE = import.meta.env.BASE_URL === "/" ? "" : import.meta.env.BASE_URL.replace(/\/$/, "");
 type ActivityScale = "raw" | "reference_z" | "delta_g0";
 type StimulusChoice = "top" | "median" | "bottom";
+type CorticalArea = "V1" | "V4" | "IT";
+type ArrayAreaBand = { area: CorticalArea; low: number; high: number };
+
+// Alfa/Beto retain the experimentally validated rig maps. Caos/Diablito come
+// from the NWB electrode/location table, checked through the unit-electrode link.
+const ARRAY_AREA_MAPS: Record<string, ArrayAreaBand[]> = {
+  Alfa: [
+    { area: "IT", low: 1, high: 32 },
+    { area: "V1", low: 33, high: 48 },
+    { area: "V4", low: 49, high: 64 },
+  ],
+  Beto: [
+    { area: "V4", low: 1, high: 16 },
+    { area: "V1", low: 17, high: 32 },
+    { area: "IT", low: 33, high: 64 },
+  ],
+  Caos: [
+    { area: "V1", low: 1, high: 32 },
+    { area: "V4", low: 33, high: 64 },
+    { area: "IT", low: 65, high: 96 },
+  ],
+  Diablito: [
+    { area: "V1", low: 1, high: 16 },
+    { area: "V4", low: 17, high: 32 },
+    { area: "IT", low: 33, high: 64 },
+  ],
+};
+
+const AREA_COLORS: Record<CorticalArea, string> = {
+  V1: "#5aa6d8",
+  V4: "#45c2a6",
+  IT: "#e4aa52",
+};
+
+function channelArea(animal: string, channel: number): CorticalArea | null {
+  return ARRAY_AREA_MAPS[animal]?.find((band) => channel >= band.low && channel <= band.high)?.area || null;
+}
+
+function arrayMapLabel(animal: string) {
+  const bands = ARRAY_AREA_MAPS[animal];
+  if (!bands) return "unresolved";
+  return bands.map(({ area, low, high }) => `${area} Ch${low}–${high}`).join(" · ");
+}
+
+function arrayMapSource(animal: string) {
+  return animal === "Caos" || animal === "Diablito" ? "NWB-validated" : "rig-validated";
+}
+
+function unitAreaSegments(animal: string, units: NonNullable<PopulationData["units"]>) {
+  const segments: { area: CorticalArea | null; start: number; end: number }[] = [];
+  units.forEach((unit, index) => {
+    const area = channelArea(animal, unit.channel);
+    const previous = segments[segments.length - 1];
+    if (!previous || previous.area !== area) segments.push({ area, start: index, end: index });
+    else previous.end = index;
+  });
+  return segments;
+}
 
 const ACTIVITY_SCALE_INFO = {
   raw: {
@@ -633,7 +691,8 @@ function ThreadView({ detail, selectedGeneration, setSelectedGeneration }: { det
             <div className="target-name"><strong>{meta.targetName}</strong><span>{meta.targetAsset ? "Exact archived stimulus" : meta.targetAssetStatus}</span></div>
             <dl className="meta-list">
               <MetaRow label="Objective" value={meta.objective} />
-              <MetaRow label="Area" value={meta.area} />
+              <MetaRow label="Objective area" value={meta.area} />
+              <MetaRow label={`Array map · ${arrayMapSource(meta.animal)}`} value={arrayMapLabel(meta.animal)} />
               <MetaRow label="Generator" value={meta.generator} />
               <MetaRow label="Baseline" value={humanBaseline(meta.baselineMode)} />
               <MetaRow label="Evoked window" value={`${meta.responseWindowSeconds[0] * 1000}–${meta.responseWindowSeconds[1] * 1000} ms`} />
@@ -669,11 +728,11 @@ function ThreadView({ detail, selectedGeneration, setSelectedGeneration }: { det
         <>
           <section className="card profile-card">
             <PanelTitle letter="E" title={`Activity profile at g${selected?.generation ?? 0}`} subtitle={`${corruptOnlineScore ? "Correctly thread-aligned recorded neural activity" : "Generation mean compared with target"} · ${ACTIVITY_SCALE_INFO[activityScale].title}`} />
-            <ProfileChart population={population} scale={activityScale} selected={selectedGeneration} />
+            <ProfileChart population={population} animal={meta.animal} scale={activityScale} selected={selectedGeneration} />
           </section>
           <section className="card heatmap-card">
             <PanelTitle letter="B" title="Population activity" subtitle={`${corruptOnlineScore ? "Correctly thread-aligned recorded neural activity" : "Fixed target and generation means"} · ${ACTIVITY_SCALE_INFO[activityScale].title}`} />
-            <PopulationHeatmap population={population} scale={activityScale} selected={selectedGeneration} onSelect={setSelectedGeneration} />
+            <PopulationHeatmap population={population} animal={meta.animal} scale={activityScale} selected={selectedGeneration} onSelect={setSelectedGeneration} />
           </section>
           <div className="two-column-grid lower-grid">
             <section className="card geometry-card">
@@ -847,13 +906,14 @@ function ObjectiveChart({ population, selected, onSelect }: { population: Popula
   );
 }
 
-function PopulationHeatmap({ population, scale, selected, onSelect }: { population: PopulationData; scale: ActivityScale; selected: number; onSelect: (value: number) => void }) {
+function PopulationHeatmap({ population, animal, scale, selected, onSelect }: { population: PopulationData; animal: string; scale: ActivityScale; selected: number; onSelect: (value: number) => void }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [hover, setHover] = useState<{ row: number; col: number } | null>(null);
   const view = useMemo(() => activityView(population, scale), [population, scale]);
   const matrix = useMemo(() => [view.target, ...view.means], [view]);
   const scaleInfo = ACTIVITY_SCALE_INFO[scale];
   const colorDomain = useMemo(() => heatmapColorDomain(matrix, scale), [matrix, scale]);
+  const areaSegments = useMemo(() => unitAreaSegments(animal, population.units || []), [animal, population.units]);
   const rows = population.units?.length || 0, cols = matrix.length;
   const height = Math.max(220, Math.min(430, rows * 10));
   const draw = useCallback(() => {
@@ -882,7 +942,13 @@ function PopulationHeatmap({ population, scale, selected, onSelect }: { populati
     context.strokeStyle = "rgba(255,255,255,.9)";
     context.lineWidth = 2;
     context.strokeRect((selected + 1) * cellWidth + 1, 1, Math.max(1, cellWidth - 2), height - 2);
-  }, [matrix, rows, cols, height, colorDomain, selected]);
+    areaSegments.slice(1).forEach((segment) => {
+      const boundary = segment.start * cellHeight;
+      context.strokeStyle = "rgba(232,241,243,.88)";
+      context.lineWidth = 1.4;
+      context.beginPath(); context.moveTo(0, boundary); context.lineTo(rect.width, boundary); context.stroke();
+    });
+  }, [matrix, rows, cols, height, colorDomain, selected, areaSegments]);
   useEffect(() => { draw(); window.addEventListener("resize", draw); return () => window.removeEventListener("resize", draw); }, [draw]);
   const locate = (clientX: number, clientY: number) => {
     const rect = canvasRef.current!.getBoundingClientRect();
@@ -893,8 +959,14 @@ function PopulationHeatmap({ population, scale, selected, onSelect }: { populati
   return (
     <div className="heatmap-wrap">
       <div className="heatmap-labels"><span>{scale === "delta_g0" ? "target − g0" : "fixed target"}</span><span>{scale === "delta_g0" ? "generation change from g0 →" : "generation means →"}</span></div>
-      <canvas ref={canvasRef} style={{ height }} onMouseMove={(event) => setHover(locate(event.clientX, event.clientY))} onMouseLeave={() => setHover(null)} onClick={(event) => { const point = locate(event.clientX, event.clientY); if (point.col > 0) onSelect(point.col - 1); }} aria-label={`${scaleInfo.title} population heatmap with ${rows} units and ${cols - 1} generations`} role="img" />
-      <div className="heatmap-footer"><div className="color-key"><span>{number(colorDomain.low, 1)}</span><i /><span>{number(colorDomain.midpoint, 1)}</span><b /><span>{number(colorDomain.high, 1)}</span><em title="Reference SD unavailable">n/a</em></div><div className="heatmap-readout">{hover && hoverUnit ? `${hoverUnit.label} · ${hover.col === 0 ? "target" : `g${hover.col - 1}`} · ${number(hoverValue, 3)}` : `${scaleInfo.yLabel} · ${colorDomain.symmetric ? "zero-centered symmetric 98% color range" : "2–98% activation range; white = range midpoint"}`}</div></div>
+      <div className="heatmap-canvas-row">
+        <canvas ref={canvasRef} style={{ height }} onMouseMove={(event) => setHover(locate(event.clientX, event.clientY))} onMouseLeave={() => setHover(null)} onClick={(event) => { const point = locate(event.clientX, event.clientY); if (point.col > 0) onSelect(point.col - 1); }} aria-label={`${scaleInfo.title} population heatmap with ${rows} units and ${cols - 1} generations, separated into cortical areas`} role="img" />
+        <div className="heatmap-area-strip" style={{ height }} aria-label={`${animal} cortical-area channel map`}>
+          {areaSegments.map((segment, index) => segment.area && <div key={`${segment.area}-${index}`} style={{ top: `${segment.start / rows * 100}%`, height: `${(segment.end - segment.start + 1) / rows * 100}%`, borderColor: AREA_COLORS[segment.area] }}><span style={{ color: AREA_COLORS[segment.area] }}>{segment.area}</span></div>)}
+        </div>
+      </div>
+      <div className="heatmap-footer"><div className="color-key"><span>{number(colorDomain.low, 1)}</span><i /><span>{number(colorDomain.midpoint, 1)}</span><b /><span>{number(colorDomain.high, 1)}</span><em title="Reference SD unavailable">n/a</em></div><div className="heatmap-readout">{hover && hoverUnit ? `${channelArea(animal, hoverUnit.channel) || "area ?"} · ${hoverUnit.label} · ${hover.col === 0 ? "target" : `g${hover.col - 1}`} · ${number(hoverValue, 3)}` : `${scaleInfo.yLabel} · ${colorDomain.symmetric ? "zero-centered symmetric 98% color range" : "2–98% activation range; white = range midpoint"}`}</div></div>
+      <AreaLegend animal={animal} />
     </div>
   );
 }
@@ -932,7 +1004,7 @@ function VectorPath({ trajectory, selected, onSelect }: { trajectory: Trajectory
   return <div className="path-wrap"><svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Population vector path toward target"><line x1={x(1)} x2={x(1)} y1={top} y2={height - bottom} className="target-line" /><line x1={left} x2={width - right} y1={y(0)} y2={y(0)} className="target-line" /><path d={path} className="path-line" />{trajectory.map((row, index) => finite(row.projectionRatio) && finite(row.residualPc1) && <circle key={index} cx={x(row.projectionRatio)} cy={y(row.residualPc1)} r={index === selected ? 7 : 4} fill={generationColor(index, trajectory.length)} className={index === selected ? "path-point selected" : "path-point"} onClick={() => onSelect(index)}><title>{`g${row.generation}: projection ${number(row.projectionRatio)}, residual ${number(row.residualPc1)}`}</title></circle>)}<text x={x(1)} y={y(0) + 5} textAnchor="middle" className="target-star">★</text><text x={(left + width - right) / 2} y={height - 10} textAnchor="middle" className="axis-title">target projection ratio → 1</text><text transform={`translate(16 ${(top + height - bottom) / 2}) rotate(-90)`} textAnchor="middle" className="axis-title">residual principal coordinate</text></svg><div className="path-caption"><span><i className="generation-gradient" /> early → late generation</span><span>★ fixed target at (1, 0)</span></div></div>;
 }
 
-function ProfileChart({ population, scale, selected }: { population: PopulationData; scale: ActivityScale; selected: number }) {
+function ProfileChart({ population, animal, scale, selected }: { population: PopulationData; animal: string; scale: ActivityScale; selected: number }) {
   const view = activityView(population, scale);
   const target = view.target, generation = view.means[selected] || [], sem = view.sems[selected] || [], units = population.units || [];
   const scaleInfo = ACTIVITY_SCALE_INFO[scale];
@@ -953,12 +1025,26 @@ function ProfileChart({ population, scale, selected }: { population: PopulationD
   };
   const yTicks = Array.from({ length: 5 }, (_, index) => min + (index / 4) * (max - min));
   const xStep = Math.max(1, Math.ceil(units.length / 9));
+  const areaSegments = unitAreaSegments(animal, units);
+  const segmentEdges = (start: number, end: number) => ({
+    left: start === 0 ? left : (x(start - 1) + x(start)) / 2,
+    right: end === units.length - 1 ? width - right : (x(end) + x(end + 1)) / 2,
+  });
   return <div className="profile-wrap"><svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`Channel-by-channel population profile in ${scaleInfo.title}`}>
+    {areaSegments.map((segment, index) => {
+      if (!segment.area) return null;
+      const edges = segmentEdges(segment.start, segment.end);
+      return <g key={`${segment.area}-${index}`} className="profile-area-band"><rect x={edges.left} y={top} width={edges.right - edges.left} height={height - top - bottom} fill={AREA_COLORS[segment.area]} /><text x={(edges.left + edges.right) / 2} y={top + 12} textAnchor="middle" fill={AREA_COLORS[segment.area]}>{segment.area}</text></g>;
+    })}
     {yTicks.map((tick) => <g key={tick}><line x1={left} x2={width - right} y1={y(tick)} y2={y(tick)} className="gridline" /><text x={left - 8} y={y(tick) + 4} textAnchor="end" className="axis-label">{number(tick, 1)}</text></g>)}
     <line x1={left} x2={width - right} y1={y(0)} y2={y(0)} className="target-line" />
     <path d={path(target)} className="profile-target" /><path d={path(generation)} className="profile-generation" />
-    {generation.map((value, index) => finite(value) && <g key={index}>{finite(sem[index]) && <><line x1={x(index)} x2={x(index)} y1={y(value - sem[index]!)} y2={y(value + sem[index]!)} className="profile-errorbar" /><line x1={x(index) - 2.5} x2={x(index) + 2.5} y1={y(value - sem[index]!)} y2={y(value - sem[index]!)} className="profile-errorbar" /><line x1={x(index) - 2.5} x2={x(index) + 2.5} y1={y(value + sem[index]!)} y2={y(value + sem[index]!)} className="profile-errorbar" /></>}<circle cx={x(index)} cy={y(value)} r="2.5" className="profile-point"><title>{`${units[index]?.label}: g${generationNumber} ${number(value)}, target ${number(target[index])}, SEM ${number(sem[index])}`}</title></circle></g>)}
+    {generation.map((value, index) => finite(value) && <g key={index}>{finite(sem[index]) && <><line x1={x(index)} x2={x(index)} y1={y(value - sem[index]!)} y2={y(value + sem[index]!)} className="profile-errorbar" /><line x1={x(index) - 2.5} x2={x(index) + 2.5} y1={y(value - sem[index]!)} y2={y(value - sem[index]!)} className="profile-errorbar" /><line x1={x(index) - 2.5} x2={x(index) + 2.5} y1={y(value + sem[index]!)} y2={y(value + sem[index]!)} className="profile-errorbar" /></>}<circle cx={x(index)} cy={y(value)} r="2.5" className="profile-point"><title>{`${channelArea(animal, units[index]?.channel) || "area ?"} · ${units[index]?.label}: g${generationNumber} ${number(value)}, target ${number(target[index])}, SEM ${number(sem[index])}`}</title></circle></g>)}
     {units.map((unit, index) => ({ unit, index })).filter(({ index }) => index % xStep === 0).map(({ unit, index }) => <text key={unit.index} x={x(index)} y={height - bottom + 22} transform={`rotate(45 ${x(index)} ${height - bottom + 22})`} className="axis-label">{unit.label}</text>)}
     <text transform={`translate(15 ${(top + height - bottom) / 2}) rotate(-90)`} textAnchor="middle" className="axis-title">{scaleInfo.yLabel}</text>
-  </svg><div className="chart-legend"><span><i className="line black" />{view.targetLabel}</span><span><i className="line teal" />{view.generationLabel} ± SEM</span></div></div>;
+  </svg><div className="chart-legend"><span><i className="line black" />{view.targetLabel}</span><span><i className="line teal" />{view.generationLabel} ± SEM</span></div><AreaLegend animal={animal} /></div>;
+}
+
+function AreaLegend({ animal }: { animal: string }) {
+  return <div className="area-legend"><span>channel area</span>{ARRAY_AREA_MAPS[animal]?.map((band) => <span key={band.area}><i style={{ background: AREA_COLORS[band.area] }} />{band.area} Ch{band.low}–{band.high}</span>)}</div>;
 }

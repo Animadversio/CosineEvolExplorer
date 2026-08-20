@@ -193,7 +193,12 @@ button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focu
 .heatmap-labels { display: grid; grid-template-columns: minmax(28px, 1fr) 5fr; color: var(--faint); font-size: 8px; margin: 3px 0 5px; }
 .heatmap-labels span:first-child { color: #cbd9dc; border-right: 1px solid #3e5863; }
 .heatmap-labels span:last-child { padding-left: 7px; }
+.heatmap-canvas-row { display: grid; grid-template-columns: minmax(0, 1fr) 38px; gap: 7px; align-items: stretch; }
 .heatmap-wrap canvas { width: 100%; display: block; border: 1px solid #2a3d47; border-radius: 5px; cursor: crosshair; image-rendering: auto; }
+.heatmap-area-strip { position: relative; min-width: 0; }
+.heatmap-area-strip > div { position: absolute; inset-inline: 0; display: grid; place-items: center; border-left: 2px solid; background: rgba(255,255,255,.018); }
+.heatmap-area-strip > div + div { border-top: 1px solid rgba(232,241,243,.35); }
+.heatmap-area-strip span { font-size: 8px; font-weight: 750; letter-spacing: .05em; }
 .heatmap-footer { display: flex; align-items: center; justify-content: space-between; gap: 15px; margin-top: 8px; }
 .color-key { display: flex; align-items: center; gap: 5px; color: var(--faint); font-size: 8px; }
 .color-key i, .color-key b { display: inline-block; width: 30px; height: 6px; }
@@ -221,6 +226,12 @@ button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focu
 .profile-generation { fill: none; stroke: var(--teal); stroke-width: 2.2; }
 .profile-point { fill: var(--teal); }
 .profile-errorbar { stroke: rgba(53,194,170,.48); stroke-width: 1; }
+.profile-area-band rect { opacity: .055; }
+.profile-area-band text { font-size: 9px; font-weight: 750; letter-spacing: .06em; opacity: .9; }
+.area-legend { display: flex; justify-content: center; align-items: center; flex-wrap: wrap; gap: 6px 12px; margin-top: 7px; color: var(--faint); font-size: 8px; }
+.area-legend > span { display: inline-flex; align-items: center; gap: 5px; }
+.area-legend > span:first-child { text-transform: uppercase; letter-spacing: .08em; color: #71848e; }
+.area-legend i { width: 7px; height: 7px; border-radius: 2px; display: inline-block; }
 
 .provenance-card { padding: 18px; display: grid; grid-template-columns: 190px 1fr; gap: 24px; }
 .provenance-card h3 { margin: 4px 0 0; font-size: 16px; }
